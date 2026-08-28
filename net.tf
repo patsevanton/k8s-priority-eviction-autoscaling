@@ -5,26 +5,26 @@ resource "yandex_vpc_network" "priority" {
 
 # Ресурс для создания подсети в зоне "ru-central1-b"
 resource "yandex_vpc_subnet" "priority-b" {
-  v4_cidr_blocks = ["10.0.1.0/24"]              # CIDR блок для подсети (IP-диапазон)
-  zone           = "ru-central1-b"              # Зона, где будет размещена подсеть
+  v4_cidr_blocks = ["10.0.1.0/24"]                # CIDR блок для подсети (IP-диапазон)
+  zone           = "ru-central1-b"                # Зона, где будет размещена подсеть
   network_id     = yandex_vpc_network.priority.id # Сеть, к которой будет привязана подсеть
-  route_table_id = yandex_vpc_route_table.rt.id # Маршрутизация исходящего трафика через NAT-шлюз
+  route_table_id = yandex_vpc_route_table.rt.id   # Маршрутизация исходящего трафика через NAT-шлюз
 }
 
 # Ресурс для создания подсети в зоне "ru-central1-d"
 resource "yandex_vpc_subnet" "priority-d" {
-  v4_cidr_blocks = ["10.0.2.0/24"]              # CIDR блок для подсети (IP-диапазон)
-  zone           = "ru-central1-d"              # Зона, где будет размещена подсеть
+  v4_cidr_blocks = ["10.0.2.0/24"]                # CIDR блок для подсети (IP-диапазон)
+  zone           = "ru-central1-d"                # Зона, где будет размещена подсеть
   network_id     = yandex_vpc_network.priority.id # Сеть, к которой будет привязана подсеть
-  route_table_id = yandex_vpc_route_table.rt.id # Маршрутизация исходящего трафика через NAT-шлюз
+  route_table_id = yandex_vpc_route_table.rt.id   # Маршрутизация исходящего трафика через NAT-шлюз
 }
 
 # Ресурс для создания подсети в зоне "ru-central1-e"
 resource "yandex_vpc_subnet" "priority-e" {
-  v4_cidr_blocks = ["10.0.3.0/24"]              # CIDR блок для подсети (IP-диапазон)
-  zone           = "ru-central1-e"              # Зона, где будет размещена подсеть
+  v4_cidr_blocks = ["10.0.3.0/24"]                # CIDR блок для подсети (IP-диапазон)
+  zone           = "ru-central1-e"                # Зона, где будет размещена подсеть
   network_id     = yandex_vpc_network.priority.id # Сеть, к которой будет привязана подсеть
-  route_table_id = yandex_vpc_route_table.rt.id # Маршрутизация исходящего трафика через NAT-шлюз
+  route_table_id = yandex_vpc_route_table.rt.id   # Маршрутизация исходящего трафика через NAT-шлюз
 }
 
 # Публичный IP-адрес для NAT-шлюза

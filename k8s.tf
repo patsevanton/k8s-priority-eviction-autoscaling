@@ -78,23 +78,18 @@ resource "yandex_kubernetes_node_group" "k8s_node_group" {
     }
   }
 
+  # Ограничение Yandex Managed K8s: node group с auto_scale может располагаться
+  # только в одной зоне — Cluster Autoscaler масштабирует группу в пределах одной location.
   allocation_policy {
-    # Распределение нод по зонам отказоустойчивости
     location { zone = local.subnet_b_zone }
-    location { zone = local.subnet_d_zone }
-    location { zone = local.subnet_e_zone }
   }
 
   instance_template {
     platform_id = "standard-v3"
 
     network_interface {
-      nat = false # Публичные IP на нодах выключены; исходящий трафик через NAT-шлюз (см. net.tf)
-      subnet_ids = [
-        local.subnet_b_id,
-        local.subnet_d_id,
-        local.subnet_e_id
-      ]
+      nat        = false # Публичные IP на нодах выключены; исходящий трафик через NAT-шлюз (см. net.tf)
+      subnet_ids = [local.subnet_b_id]
     }
 
     resources {
