@@ -1,6 +1,6 @@
 # Критически важное приложение.
-# priorityClassName не указан — под получает приоритет 0 (выше -1000 у placeholder'ов).
-# При нехватке ресурсов вытесняет placeholder-поды.
+# priorityClassName не указан — под получает приоритет 0 (выше -1000 у pause-подов).
+# При нехватке ресурсов вытесняет pause-поды.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +24,7 @@ spec:
         - containerPort: 80
         resources:
           requests:
-            cpu: 900m # Не помещается на ноду вместе с placeholder-подом: будет вытеснение
+            cpu: 900m # Не помещается на ноду вместе с pause-подом: будет вытеснение
             memory: 1Gi
           limits:
             cpu: "1"

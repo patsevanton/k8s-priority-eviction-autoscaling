@@ -1,4 +1,4 @@
-# PriorityClass для placeholder-подов (overprovisioning): отрицательное значение
+# PriorityClass для pause-подов (overprovisioning): отрицательное значение
 # делает их первыми кандидатами на вытеснение — ниже только системные классы.
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass

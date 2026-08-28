@@ -1,5 +1,5 @@
-# Placeholder-поды для предварительного резервирования мощностей (overprovisioning).
-# Пауза-контейнер не делает ничего — его единственная задача через resources.requests
+# Pause-поды для предварительного резервирования мощностей (overprovisioning).
+# Pause-контейнер не делает ничего — его единственная задача через resources.requests
 # «занимать место» на нодах, которое мгновенно освободится при вытеснении.
 #
 # Математика резерва для демо-стенда (нода 2 vCPU / 4 ГБ, системные резервы ~600m CPU):
@@ -22,11 +22,11 @@ spec:
         app: overprovisioning
     spec:
       # Отрицательный приоритет: любой под без priorityClassName (приоритет 0)
-      # вытеснит placeholder мгновенно.
+      # вытеснит pause-под мгновенно.
       priorityClassName: overprovisioning-placeholder
       # Не ждём 30 секунд graceful shutdown — место должно освобождаться сразу
       terminationGracePeriodSeconds: 0
-      # Распределяем placeholder-поды по разным нодам, чтобы резерв
+      # Распределяем pause-поды по разным нодам, чтобы резерв
       # не сваливался на одну и ту же ноду
       affinity:
         podAntiAffinity:
@@ -42,7 +42,7 @@ spec:
         image: registry.k8s.io/pause:3.10
         resources:
           requests:
-            cpu: 900m # Объём резерва на один placeholder-под
+            cpu: 900m # Объём резерва на один pause-под
             memory: 1Gi
           limits:
             cpu: 900m
