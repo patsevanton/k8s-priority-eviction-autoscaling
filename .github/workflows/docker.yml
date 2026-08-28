@@ -1,0 +1,60 @@
+name: Release and Docker
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-and-docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create Semver Release
+        id: semver
+        uses: huggingface/semver-release-action@latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print version and tag
+        run: |
+          echo "Version: ${{ steps.semver.outputs.version }}"
+          echo "Tag:     ${{ steps.semver.outputs.tag }}"
+
+      - name: Login to GHCR
+        if: steps.semver.outputs.tag != ''
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push business-app image
+        if: steps.semver.outputs.tag != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: ./apps/business-app
+          file: ./apps/business-app/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/business-app:${{ steps.semver.outputs.version }}
+            ghcr.io/${{ github.repository }}/business-app:latest
+
+      - name: Build and push load-generator image
+        if: steps.semver.outputs.tag != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: ./apps/load-generator
+          file: ./apps/load-generator/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/load-generator:${{ steps.semver.outputs.version }}
+            ghcr.io/${{ github.repository }}/load-generator:latest

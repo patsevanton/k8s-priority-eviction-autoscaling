@@ -1,0 +1,31 @@
+# KEDA ScaledObject: масштабирование business-app по фактическому RPS.
+# Метрику rate(business_app_http_requests_total[1m]) берём из VictoriaMetrics
+# (совместим с Prometheus API) через endpoint vmsingle.
+#
+# Математика масштабирования:
+#   желаемые реплики = ceil(суммарный RPS / 25)
+#   5 RPS  → 1 реплика, 60 RPS → 3 реплики, 100 RPS → 4 реплики.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: business-app
+spec:
+  scaleTargetRef:
+    name: business-app
+  minReplicaCount: 1 # Ночью (0 RPS) держим одну реплику
+  maxReplicaCount: 4 # Ограничено демо-стендом: 3 ноды по 2 vCPU
+  pollingInterval: 15 # Как часто опрашиваем метрику (секунды)
+  cooldownPeriod: 120 # Не отпускаем реплики сразу после падения RPS
+  fallback: # Если VictoriaMetrics недоступен — не разгоняемся
+    replicas: 1
+    failureThreshold: 3
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://vmsingle-vmks.vmks.svc.cluster.local:8428
+      query: |
+        sum(rate(business_app_http_requests_total{route="root"}[1m]))
+      threshold: "25" # Одна реплика обслуживает ~25 RPS
+      activationThreshold: "3" # Ниже 3 RPS не поднимаем дополнительные реплики
+---
+# TriggerAuthentication не нужен: VictoriaMetrics в демо доступен без авторизации.

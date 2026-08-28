@@ -1,0 +1,63 @@
+# Бизнес-приложение: HTTP API на Go с метриками Prometheus на /metrics.
+# Масштабируется по RPS через KEDA (см. scaledobject.yaml). Реплики бизнес-приложения
+# вытесняют placeholder-поды overprovisioning (у тех приоритет -1000, здесь — 0).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: business-app
+  labels:
+    app: business-app
+spec:
+  replicas: 1 # KEDA возьмёт управление репликами под себя
+  selector:
+    matchLabels:
+      app: business-app
+  template:
+    metadata:
+      labels:
+        app: business-app
+    spec:
+      containers:
+      - name: app
+        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/business-app:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: LISTEN_ADDR
+          value: ":8080"
+        - name: REQUEST_LATENCY_MS
+          value: "30" # Имитация полезной работы обработчика
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 900m # Совпадает с размером резерва placeholder-пода: реплика вытеснит его
+            memory: 1Gi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: business-app
+  labels:
+    app: business-app
+spec:
+  selector:
+    app: business-app
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
