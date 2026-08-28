@@ -1,0 +1,33 @@
+# Специализированные (низкоприоритетные) поды-воркеры.
+# Явно указанный priorityClassName перекрывает globalDefault.
+# Ресурсы подобраны так, чтобы 2 пода полностью заполнили ноду 2 vCPU / 4 ГБ:
+# 2 пода * 900m CPU = 1800m из 2000m (минус системные резервы kubelet).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: specialized-worker
+  labels:
+    app: specialized-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: specialized-worker
+  template:
+    metadata:
+      labels:
+        app: specialized-worker
+    spec:
+      priorityClassName: low-priority-specialized # Явное указание низкого приоритета
+      terminationGracePeriodSeconds: 5 # Быстрое завершение при вытеснении
+      containers:
+      - name: worker
+        image: busybox:1.37
+        command: ["sh", "-c", "echo 'specialized worker started'; sleep 3600"]
+        resources:
+          requests:
+            cpu: 900m # Больше половины ноды: 2 реплики забьют всю ноду
+            memory: 1.5Gi
+          limits:
+            cpu: "1"
+            memory: 2Gi
