@@ -26,17 +26,19 @@ kubectl apply -f priorityclasses.yaml
 
 ```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
-NAME                      VALUE        GLOBAL-DEFAULT   AGE
-high-priority-default     1000000      true             5s    ← дефолтный
-low-priority-specialized  1000         false            5s    ← для специализированных
-system-cluster-critical   2000000000   false            10m
-system-node-critical      2000001000   false            10m
+NAME                        VALUE        GLOBAL-DEFAULT   AGE
+high-priority-default       1000000      true             5s    ← дефолтный
+low-priority-specialized    1000         false            5s    ← для специализированных
+overprovisioning-placeholder -1000       false            5s    ← для pause-заглушек
+system-cluster-critical     2000000000   false            10m
+system-node-critical        2000001000   false            10m
 ```
 
-Проверяем, что приоритет применился к обычному поду:
+Проверяем, что приоритет применился к обычному поду (pause-контейнер — минимальный
+образ, который ничего не делает):
 
 ```bash
-$ kubectl run test-pod --image=busybox:1.37 --restart=Never -- sleep 60
+$ kubectl run test-pod --image=registry.k8s.io/pause:3.10 --restart=Never
 $ kubectl get pod test-pod -o jsonpath='{.spec.priority} {"\n"}'
 1000000
 ```
@@ -78,12 +80,24 @@ $ kubectl get events --sort-by=.lastTimestamp | tail -8
 LAST SEEN   TYPE      REASON      OBJECT                            MESSAGE
 2m          Normal    Scheduled   pod/critical-app-5c8d7f-9xz4l     Successfully assigned default/critical-app-5c8d7f-9xz4l to cl1...-uxyz
 2m          Normal   Preempted   pod/specialized-worker-...xk2p9   By default/critical-app-5c8d7f-9xz4l on node cl1...-uxyz
-2m          Normal   Killing     pod/specialized-worker-...xk2p9   Stopping container worker
-2m          Normal   Killing     pod/specialized-worker-...xk2p9   Container worker terminated successfully
+2m          Normal   Killing     pod/specialized-worker-...xk2p9   Stopping container pause
+2m          Normal   Killing     pod/specialized-worker-...xk2p9   Container pause terminated successfully
 ```
 
 Ключевое событие — `Preempted ... By default/critical-app-...`: планировщик явно
 показывает, кто кого вытеснил.
+
+Полезно заглянуть и в статус вытесняющего пода: пока жертвы завершаются,
+планировщик «номинирует» для него ноду в поле `nominatedNodeName`:
+
+```bash
+$ kubectl get pod critical-app-5c8d7f-9xz4l -o jsonpath='{.status.nominatedNodeName} {"\n"}'
+cl1v2fmpkgn4srb2b1mm-uxyz
+```
+
+Номинация — не гарантия: если за время graceful shutdown жертвы освободится
+другая нода (или придёт ещё более приоритетный под и займёт место), фактическая
+нода размещения может отличаться, а `nominatedNodeName` будет очищен.
 
 Состояние подов: critical-app работает на ноде, вытесненный воркер — в Pending:
 
@@ -147,6 +161,66 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordon
 > помещались на оставшиеся ноды — поэтому после удаления critical-app
 > оба воркера вернутся на первую ноду.
 
+## Шаг 6 (опционально). «Тёплый» резерв через placeholder-поды
+
+> Шаг 6 — расширение сценария: сначала прогоните шаги 0–5, затем вернитесь к шагу 2
+> и выполните шаги 2–4 ещё раз (нода снова должна быть заполнена двумя воркерами
+> и critical-app).
+
+Вариация того же механизма — [overprovisioning](https://kubernetes.io/docs/tasks/administer-cluster/node-overprovisioning/):
+в кластер запускаются pause-поды с отрицательным приоритетом, которые ничего
+не делают, а только «держат» место. Смысл смотреть на живом кластере:
+нода под будущий пик разворачивается **заранее**, ещё до прихода нагрузки.
+
+```bash
+kubectl apply -f manifests/overprovisioning.yaml
+```
+
+Placeholder-поды (2 реплики по 900m CPU / 1.5Gi) не помещаются на заполненную
+ноду — Cluster Autoscaler разворачивает под них ещё одну (max = 3 в node group,
+так что для демо этого хватает):
+
+```bash
+$ kubectl get pods -o wide
+NAME                              READY   STATUS    NODE
+specialized-worker-...-xk2p9      1/1     Running   cl1...-uxyz
+specialized-worker-...-m4n8q      1/1     Running   cl1...-uxyz
+critical-app-5c8d7f-9xz4l         1/1     Running   cl1...-uxyz
+overprovisioning-...-a1b2c        1/1     Running   cl1...-uabc   ← «тёплая» нода
+overprovisioning-...-d3e4f        0/1     Pending                   ← вторая заглушка ждёт
+```
+
+Анти-аффинность в манифесте распределяет заглушки по разным нодам, поэтому
+одна заняла новую ноду, а вторая осталась в Pending — она и удерживает
+Autoscaler от scale-down обратно к одной ноде.
+
+Теперь проверяем суть паттерна: создаём ещё один критичный под — он вытесняет
+placeholder мгновенно (у того и `terminationGracePeriodSeconds: 0`), не дожидаясь
+создания ноды:
+
+```bash
+$ kubectl scale deployment critical-app --replicas=2
+
+$ kubectl get events --sort-by=.lastTimestamp | tail -4
+LAST SEEN   TYPE      REASON      OBJECT                          MESSAGE
+20s         Normal    Scheduled   pod/critical-app-...-7g8h9      Successfully assigned default/critical-app-...-7g8h9 to cl1...-uabc
+35s         Normal    Preempted   pod/overprovisioning-...-a1b2c  By default/critical-app-...-7g8h9 on node cl1...-uabc
+35s         Normal    Killing     pod/overprovisioning-...-a1b2c  Stopping container pause
+```
+
+Критичный под запустился на «тёплой» ноде за секунды — вместо 2–3 минут
+ожидания новой ноды. Вытесненная заглушка ушла в Pending, и кластер начал
+восстанавливать буфер: Autoscaler увидит её и при необходимости добавит ноду.
+
+Когда резерв не нужен — убираем:
+
+```bash
+kubectl delete -f manifests/overprovisioning.yaml
+```
+
+После удаления placeholder-подов Cluster Autoscaler через несколько минут
+замечает недозагрузку и удаляет «тёплую» ноду (scale-down, как на шаге 5).
+
 ## Что пошло не так? (Траблшутинг)
 
 **Вытеснение не происходит, все поды Pending.** Проверьте requests у обоих
@@ -172,11 +246,24 @@ yc managed-kubernetes node-group get <node-group-id> --show-log
 yc resource-manager folder list-limits --name <folder>
 ```
 
+**Жертвы вытеснены, но вытесняющий под так и не запустился.** Жертвы получают
+graceful termination period (30 секунд по умолчанию) — всё это время место
+считается занятым, и только после ухода жертв preemptor может быть запланирован.
+Кроме того, пока жертвы завершаются, может прийти под с ещё более высоким
+приоритетом и занять место — это ожидаемое поведение Kubernetes, а не баг.
+Проверить, что место действительно зарезервировано за подом, можно полем
+`status.nominatedNodeName`:
+
+```bash
+kubectl get pod <pod> -o jsonpath='{.status.nominatedNodeName} {"\n"}'
+```
+
 ## Очистка
 
 ```bash
 kubectl delete -f manifests/critical-app.yaml
 kubectl delete -f manifests/specialized-worker.yaml
+kubectl delete -f manifests/overprovisioning.yaml
 kubectl delete -f priorityclasses.yaml
 terraform destroy
 ```

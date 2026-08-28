@@ -1,5 +1,7 @@
 # Специализированные (низкоприоритетные) поды-воркеры.
 # Явно указанный priorityClassName перекрывает globalDefault.
+# Контейнер pause — минимальный образ, который ничего не делает:
+# для демо важен только факт занимаемых resources.requests.
 # Ресурсы подобраны так, чтобы 2 пода полностью заполнили ноду 2 vCPU / 4 ГБ:
 # 2 пода * 900m CPU = 1800m из 2000m (минус системные резервы kubelet).
 apiVersion: apps/v1
@@ -22,8 +24,7 @@ spec:
       terminationGracePeriodSeconds: 5 # Быстрое завершение при вытеснении
       containers:
       - name: worker
-        image: busybox:1.37
-        command: ["sh", "-c", "echo 'specialized worker started'; sleep 3600"]
+        image: registry.k8s.io/pause:3.10
         resources:
           requests:
             cpu: 900m # Больше половины ноды: 2 реплики забьют всю ноду

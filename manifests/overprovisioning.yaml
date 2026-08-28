@@ -1,0 +1,49 @@
+# Placeholder-поды для предварительного резервирования мощностей (overprovisioning).
+# Пауза-контейнер не делает ничего — его единственная задача через resources.requests
+# «занимать место» на нодах, которое мгновенно освободится при вытеснении.
+#
+# Математика резерва для демо-стенда (нода 2 vCPU / 4 ГБ, системные резервы ~600m CPU):
+#   replicas 2 × (900m CPU / 1.5Gi) ≈ одна «тёплая» нода под будущий пик.
+# Измените replicas и requests под размер вашего типичного всплеска нагрузки.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overprovisioning
+  labels:
+    app: overprovisioning
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: overprovisioning
+  template:
+    metadata:
+      labels:
+        app: overprovisioning
+    spec:
+      # Отрицательный приоритет: любой под без priorityClassName (приоритет 0)
+      # и тем более под с high-priority-default вытеснит placeholder мгновенно.
+      priorityClassName: overprovisioning-placeholder
+      # Не ждём 30 секунд graceful shutdown — место должно освобождаться сразу
+      terminationGracePeriodSeconds: 0
+      # Распределяем placeholder-поды по разным нодам, чтобы резерв
+      # не сваливался на одну и ту же ноду
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: overprovisioning
+              topologyKey: topology.kubernetes.io/hostname
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests:
+            cpu: 900m # Объём резерва на один placeholder-под
+            memory: 1.5Gi
+          limits:
+            cpu: 900m
+            memory: 1.5Gi
