@@ -22,7 +22,7 @@ spec:
         app: overprovisioning
     spec:
       # Отрицательный приоритет: любой под без priorityClassName (приоритет 0)
-      # и тем более под с high-priority-default вытеснит placeholder мгновенно.
+      # вытеснит placeholder мгновенно.
       priorityClassName: overprovisioning-placeholder
       # Не ждём 30 секунд graceful shutdown — место должно освобождаться сразу
       terminationGracePeriodSeconds: 0

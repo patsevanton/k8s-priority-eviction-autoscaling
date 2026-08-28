@@ -1,6 +1,6 @@
-# Критически важное приложение (высокий приоритет).
-# priorityClassName не указан — под получает high-priority-default (1000000)
-# через globalDefault. При нехватке ресурсов вытесняет placeholder-поды.
+# Критически важное приложение.
+# priorityClassName не указан — под получает приоритет 0 (выше -1000 у placeholder'ов).
+# При нехватке ресурсов вытесняет placeholder-поды.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +17,6 @@ spec:
       labels:
         app: critical-app
     spec:
-      # priorityClassName: high-priority-default # можно указать явно; globalDefault применит его сам
       containers:
       - name: app
         image: nginx:1.27

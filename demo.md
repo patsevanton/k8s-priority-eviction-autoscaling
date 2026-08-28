@@ -27,7 +27,6 @@ kubectl apply -f priorityclasses.yaml
 ```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                        VALUE        GLOBAL-DEFAULT   AGE
-high-priority-default       1000000      true             5s    ← дефолтный
 overprovisioning-placeholder -1000       false            5s    ← для pause-заглушек
 system-cluster-critical     2000000000   false            10m
 system-node-critical        2000001000   false            10m
@@ -39,9 +38,11 @@ system-node-critical        2000001000   false            10m
 ```bash
 $ kubectl run test-pod --image=registry.k8s.io/pause:3.10 --restart=Never
 $ kubectl get pod test-pod -o jsonpath='{.spec.priority} {"\n"}'
-1000000
+0
 $ kubectl delete pod test-pod
 ```
+
+Приоритет 0 выше -1000 у placeholder'ов — этого достаточно для вытеснения.
 
 ## Шаг 2. Запускаем placeholder-поды
 
@@ -75,7 +76,7 @@ scale-down обратно к одной ноде.
 kubectl apply -f manifests/critical-app.yaml
 ```
 
-critical-app (requests 900m / 1.5Gi, приоритет 1000000 через globalDefault)
+critical-app (requests 900m / 1.5Gi, приоритет 0)
 находит ноду с placeholder'ом (приоритет -1000) и вытесняет его. Благодаря
 `terminationGracePeriodSeconds: 0` место освобождается сразу — критичный под
 стартует за секунды, не дожидаясь создания новой ноды:

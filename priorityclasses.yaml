@@ -1,13 +1,3 @@
-# PriorityClass по умолчанию: все поды без явного priorityClassName
-# получают высокий приоритет 1000000.
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: high-priority-default
-value: 1000000
-globalDefault: true # Все поды без указанного priorityClassName получат этот класс
-description: "Приоритет по умолчанию для всех обычных подов"
----
 # PriorityClass для placeholder-подов (overprovisioning): отрицательное значение
 # делает их первыми кандидатами на вытеснение — ниже только системные классы.
 apiVersion: scheduling.k8s.io/v1
