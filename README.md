@@ -216,7 +216,7 @@ Placeholder-поды не бесплатны: буфер — это проста
 
 ## Демо: вытеснение в живом кластере
 
-Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что кластер уже развёрнут через Terraform ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) и kubeconfig получен.
+Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что кластер уже развёрнут через Terraform ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) и kubeconfig получен. Terraform заодно ставит в namespace `vmks` стек мониторинга VictoriaMetrics (vmagent + vmsingle + Grafana за Traefik) — из vmsingle KEDA берёт метрику RPS для масштабирования business-app (см. `manifests/keda/scaledobject.yaml`).
 
 Стенд: одна нода 2 vCPU / 4 ГБ, node group `auto_scale { min = 1, max = 3 }` — это и есть включённый Cluster Autoscaler. В Yandex Managed K8s отдельная установка Cluster Autoscaler не нужна: `auto_scale` вместо `fixed_scale` — и платформа запускает управляемый автоскейлер.
 
@@ -231,6 +231,13 @@ $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                      VALUE        GLOBAL-DEFAULT   AGE
 system-cluster-critical   2000000000   false            10m
 system-node-critical      2000001000   false            10m
+
+# Мониторинг (namespace vmks): vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
+$ kubectl get pods -n vmks
+NAME                                          READY   STATUS    RESTARTS   AGE
+vmsingle-vmks-victoria-metrics-k8s-stack-0    1/1     Running   0          5m
+vmagent-vmks-victoria-metrics-k8s-stack-0     1/1     Running   0          5m
+...
 ```
 
 ### Шаг 1. Применяем PriorityClass
@@ -437,7 +444,7 @@ Overprovisioning через placeholder-поды — это про покупк�
 
 Все конфигурации из статьи:
 
-- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) — Terraform для кластера с `auto_scale` node group
+- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) — Terraform для кластера с `auto_scale` node group, Traefik и VictoriaMetrics K8s Stack
 - [priorityclasses.yaml](priorityclasses.yaml) — PriorityClass для placeholder-подов с отрицательным значением
 - [manifests/critical-app.yaml](manifests/critical-app.yaml) — критичное приложение
 - [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml) — placeholder-поды для «тёплого» резерва

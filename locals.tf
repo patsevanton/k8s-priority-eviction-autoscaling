@@ -8,4 +8,8 @@ locals {
   subnet_b_zone = yandex_vpc_subnet.priority-b.zone
   subnet_d_zone = yandex_vpc_subnet.priority-d.zone
   subnet_e_zone = yandex_vpc_subnet.priority-e.zone
+
+  # Публичный IP балансировщика Traefik → FQDN Grafana через sslip.io
+  ingress_ip   = yandex_vpc_address.ingress.external_ipv4_address[0].address
+  grafana_fqdn = "grafana.${local.ingress_ip}.sslip.io"
 }
