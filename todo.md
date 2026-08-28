@@ -100,3 +100,4 @@ kubectl run -it --rm curl --image=curlimages/curl --restart=Never -- \
 - [ ] Проверить имя HPA, который создаёт KEDA (обычно `keda-hpa-<scaledobject-name>`).
 - [ ] Решить, публиковать ли `values-vmks.yaml` в репозитории как полноценный файл вместо инструкции в README.
 - [ ] Возможно, зафиксировать тег образов в манифестах вместо `latest`.
+- [ ] Перепроверить: в README пошаговое демо (шаги 0–5) идёт через `manifests/critical-app.yaml` и ручной `kubectl apply`, а KEDA-сценарий с load-generator'ом (лестница RPS) описан только здесь. Решить, добавить ли KEDA-демо в README или оставить оба сценария.
