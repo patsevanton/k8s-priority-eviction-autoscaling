@@ -118,7 +118,7 @@ placeholder-подов с `terminationGracePeriodSeconds: 0` задержка н
 ## Шаг 4. Cluster Autoscaler восстанавливает буфер
 
 Теперь в кластере два Pending placeholder-пода — они не помещаются на
-оставшиеся ноды. Через 2–3 минуты Cluster Autoscaler разворачивает третью ноду
+оставшиеся ноды. Через до 10 минут Cluster Autoscaler разворачивает третью ноду
 (в рамках лимита `max = 3`):
 
 ```bash
