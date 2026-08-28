@@ -50,7 +50,7 @@ $ kubectl delete pod test-pod
 kubectl apply -f manifests/overprovisioning.yaml
 ```
 
-Две реплики с requests 900m CPU / 1.5Gi каждая не помещаются на стартовую ноду
+Две реплики с requests 900m CPU / 1Gi каждая не помещаются на стартовую ноду
 (600m CPU и ~1 ГБ уже уходят на системные поды и резервы kubelet) — Cluster
 Autoscaler разворачивает под них вторую ноду:
 
@@ -81,7 +81,7 @@ HPA только что создал».
 kubectl apply -f manifests/critical-app.yaml
 ```
 
-critical-app (requests 900m / 1.5Gi, приоритет 0)
+critical-app (requests 900m / 1Gi, приоритет 0)
 находит ноду с placeholder'ом (приоритет -1000) и вытесняет его. Благодаря
 `terminationGracePeriodSeconds: 0` место освобождается сразу — критичный под
 стартует за секунды, не дожидаясь создания новой ноды:

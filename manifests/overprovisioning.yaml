@@ -3,7 +3,7 @@
 # «занимать место» на нодах, которое мгновенно освободится при вытеснении.
 #
 # Математика резерва для демо-стенда (нода 2 vCPU / 4 ГБ, системные резервы ~600m CPU):
-#   replicas 2 × (900m CPU / 1.5Gi) ≈ одна «тёплая» нода под будущий пик.
+#   replicas 2 × (900m CPU / 1Gi) ≈ одна «тёплая» нода под будущий пик.
 # Измените replicas и requests под размер вашего типичного всплеска нагрузки.
 apiVersion: apps/v1
 kind: Deployment
@@ -43,7 +43,7 @@ spec:
         resources:
           requests:
             cpu: 900m # Объём резерва на один placeholder-под
-            memory: 1.5Gi
+            memory: 1Gi
           limits:
             cpu: 900m
-            memory: 1.5Gi
+            memory: 1Gi
