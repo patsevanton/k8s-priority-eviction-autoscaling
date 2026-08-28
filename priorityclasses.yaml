@@ -8,17 +8,6 @@ value: 1000000
 globalDefault: true # Все поды без указанного priorityClassName получат этот класс
 description: "Приоритет по умолчанию для всех обычных подов"
 ---
-# PriorityClass для специализированных подов: значение меньше дефолтного,
-# поэтому при нехватке ресурсов именно эти поды будут вытеснены первыми.
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: low-priority-specialized
-value: 1000 # Меньше, чем у дефолтного класса
-globalDefault: false
-description: "Низкий приоритет для специализированных подов"
-preemptionPolicy: PreemptLowerPriority # Значение по умолчанию: высокий вытесняет низкий
----
 # PriorityClass для placeholder-подов (overprovisioning): отрицательное значение
 # делает их первыми кандидатами на вытеснение — ниже только системные классы.
 apiVersion: scheduling.k8s.io/v1
