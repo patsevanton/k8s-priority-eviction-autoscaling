@@ -25,3 +25,4 @@ docker push ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator
 - [ ] Перепроверить тег образа `registry.k8s.io/pause:3.10` (README и `manifests/overprovisioning.yaml`). Такого тега может не существовать.
 - [ ] Перепроверить реальные имена подов vmsingle/vmagent в `kubectl get pods -n vmks`. По рендеру чарта 0.90.2 CR/StatefulSet называются `vmks-victoria-metrics-k8s-stack`, а не `vmsingle-vmks-victoria-metrics-k8s-stack-0` / `vmagent-vmks-...-0`.
 - [ ] Перепроверить `loadBalancerIP` в `monitoring.tf` — поддерживается ли явный IP балансировщика в Yandex Managed K8s (обычно используется аннотация, а не `spec.loadBalancerIP`).
+- [ ] Добавить descheduler и проверить, как он будет отрабатывать при снижении нагрузки и уменьшении количества подов.
