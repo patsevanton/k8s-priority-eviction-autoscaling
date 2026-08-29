@@ -261,44 +261,47 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода по
 ```
 Анти-аффинность в манифесте распределяет capacity-overprovisioning поды по разным нодам, поэтому один занял новую ноду, а второй остался в Pending — он и удерживает Autoscaler от scale-down обратно к одной ноде.
 
-### Шаг 3. Запускаем критичное приложение — имитация роста нагрузки
+### Шаг 3. Устанавливаем KEDA
 
-В реальной жизни этот момент выглядит так: нагрузка на бизнес-сервис растёт, HPA поднимает `replicas`, и новые поды должны стартовать немедленно. В демо мы имитируем этот рост одним `kubectl apply` — critical-app играет роль «реплики, которую HPA только что создал».
+KEDA добавляет в кластер горизонтальный автоскейлинг приложений по внешним метрикам — в нашем случае по RPS из Prometheus-совместимого API vmsingle:
 
 ```bash
-kubectl apply -f manifests/critical-app.yaml
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
 ```
-critical-app (requests 900m / 1Gi, приоритет 0) находит ноду с capacity-overprovisioning подом (приоритет -1000) и вытесняет его. Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу — критичный под стартует за секунды, не дожидаясь создания новой ноды:
+
+### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
 ```bash
-$ kubectl get events --sort-by=.lastTimestamp | tail -4
+kubectl apply -f manifests/keda/business-app.yaml
+kubectl apply -f manifests/keda/scaledobject.yaml
+kubectl apply -f manifests/keda/load-generator.yaml
+```
+
+- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 900m CPU / 1Gi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -1000).
+- `scaledobject.yaml` — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
+- `load-generator` — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
+
+### Шаг 5. Наблюдаем полный цикл: рост → вытеснение → восстановление буфера
+
+Следим за репликами business-app и HPA, который создал KEDA:
+
+```bash
+$ kubectl get deployment business-app -w
+$ kubectl get hpa keda-hpa-business-app -w
+```
+
+Когда лестница RPS поднимается выше 25 RPS, KEDA добавляет реплику. Новая реплика (requests 900m/1Gi, приоритет 0) не помещается на занятые ноды — планировщик вытесняет capacity-overprovisioning под (приоритет -1000). Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу:
+
+```bash
+$ kubectl get events --sort-by=.lastTimestamp | grep -E 'Preempted|Scaled'
 LAST SEEN   TYPE      REASON      OBJECT                          MESSAGE
-20s         Normal    Scheduled   pod/critical-app-...-7g8h9      Successfully assigned default/critical-app-...-7g8h9 to cl1...-uabc
-35s         Normal    Preempted   pod/overprovisioning-...-a1b2c  By default/critical-app-...-7g8h9 on node cl1...-uabc
+20s         Normal    Preempted   pod/overprovisioning-...-a1b2c  By default/business-app-...-7g8h9 on node cl1...-uabc
 35s         Normal    Killing     pod/overprovisioning-...-a1b2c  Stopping container pause
 ```
-Ключевое событие — `Preempted ... By default/critical-app-...`: планировщик явно показывает, кто кого вытеснил.
+Ключевое событие — `Preempted ... By default/business-app-...`: планировщик явно показывает, кто кого вытеснил.
 
-Состояние подов: critical-app работает на «тёплой» ноде, вытесненный capacity-overprovisioning под — в Pending:
-
-```bash
-$ kubectl get pods -o wide
-NAME                              READY   STATUS    NODE
-critical-app-...-7g8h9            1/1     Running   cl1...-uabc
-overprovisioning-...-a1b2c        0/1     Pending                 ← вытеснен
-overprovisioning-...-d3e4f        0/1     Pending
-```
-Полезно заглянуть и в статус вытесняющего пода: пока жертва завершается, планировщик «номинирует» для него ноду в поле `nominatedNodeName`:
-
-```bash
-$ kubectl get pod critical-app-...-7g8h9 -o jsonpath='{.status.nominatedNodeName} {"\n"}'
-cl1v2fmpkgn4srb2b1mm-uabc
-```
-Номинация — не гарантия: если за время graceful shutdown жертвы освободится другая нода (или придёт ещё более приоритетный под и займёт место), фактическая нода размещения может отличаться, а `nominatedNodeName` будет очищен. Для capacity-overprovisioning подов с `terminationGracePeriodSeconds: 0` задержка нулевая.
-
-### Шаг 4. Cluster Autoscaler восстанавливает буфер
-
-Теперь в кластере два Pending capacity-overprovisioning пода — они не помещаются на оставшиеся ноды. Через до 10 минут Cluster Autoscaler разворачивает третью ноду (в рамках лимита `max = 3`):
+Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (до 10 минут, в рамках `max = 3`):
 
 ```bash
 $ kubectl get nodes -w
@@ -307,27 +310,24 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   25m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   9m
 cl1v2fmpkgn4srb2b1mm-wxyz   Ready    <none>   47s   ← новая нода под буфер
 ```
-Capacity-overprovisioning поды запускаются на новой ноде, и «тёплый» резерв восстановлен:
+На новой ноде capacity-overprovisioning поды снова становятся Running — «тёплый» резерв восстановлен:
 
 ```bash
 $ kubectl get pods -o wide
 NAME                              READY   STATUS    NODE
-critical-app-...-7g8h9            1/1     Running   cl1...-uabc
+business-app-...-7g8h9            1/1     Running   cl1...-uabc
 overprovisioning-...-a1b2c        1/1     Running   cl1...-wxyz   ← буфер снова готов
 overprovisioning-...-d3e4f        1/1     Running   cl1...-wxyz
 ```
-Полный цикл замкнулся: **рост нагрузки → мгновенное вытеснение → реальный под работает → новая нода → буфер восстановлен**.
+Полный цикл замкнулся: **рост RPS → KEDA поднимает реплики → мгновенное вытеснение → реальный под работает → новая нода → буфер восстановлен**.
 
-### Шаг 5. Проверяем scale-down
+### Шаг 6. Спад нагрузки и scale-down
 
-Удаляем critical-app и capacity-overprovisioning поды — через несколько минут Cluster Autoscaler поймёт, что лишние ноды недозагружены, и удалит их:
+Когда лестница RPS опускается к 0 (ночь), KEDA — после `cooldownPeriod: 120` — возвращает реплики business-app к 1. Через несколько минут Cluster Autoscaler поймёт, что лишние ноды недозагружены, и удалит их:
 
 ```bash
-kubectl delete -f manifests/critical-app.yaml
-kubectl delete -f manifests/overprovisioning.yaml
-
 $ kubectl get nodes -w
-# ... спустя ~10 минут
+# ... спустя ~10 минут после спада нагрузки
 NAME                       STATUS                     ROLES    AGE
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready                      <none>   35m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordoned
@@ -337,11 +337,20 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordon
 
 ### Что пошло не так? (Траблшутинг)
 
-**Вытеснение не происходит, критичный под в Pending.** Проверьте requests у Deployment: без `resources.requests` планировщик считает под «бесплатным» и не вытесняет никого.
+**Вытеснение не происходит, новые реплики business-app в Pending.** Проверьте requests у Deployment: без `resources.requests` планировщик считает под «бесплатным» и не вытесняет никого.
 
 ```bash
 kubectl describe pod <pod> | grep -A3 "Requests"
 ```
+**KEDA не поднимает реплики.** Проверьте, что метрика RPS доходит до KEDA: HPA, созданный KEDA, и запрос к vmsingle:
+
+```bash
+kubectl get hpa keda-hpa-business-app -o yaml
+kubectl run -it --rm curl --image=curlimages/curl --restart=Never -- \
+  curl -s 'http://vmsingle-vmks.vmks.svc.cluster.local:8428/select/0/prometheus/api/v1/query?query=sum(rate(business_app_http_requests_total{route="root"}[1m]))'
+```
+Если метрика пустая — проверьте, что vmagent скрейпит `/metrics` business-app (при необходимости добавьте в `manifests/keda/business-app.yaml` аннотации `prometheus.io/scrape: "true"`, `prometheus.io/port: "8080"`, `prometheus.io/path: "/metrics"`).
+
 **Capacity-overprovisioning поды не создают новую ноду.** Проверьте, что node group действительно с auto_scale, и посмотрите события:
 
 ```bash
@@ -353,14 +362,17 @@ yc managed-kubernetes node-group get <node-group-id> --show-log
 ```bash
 yc resource-manager folder list-limits --name <folder>
 ```
-**Критичный под запустился не мгновенно.** Убедитесь, что у capacity-overprovisioning подов стоит `terminationGracePeriodSeconds: 0` — иначе место освобождается только после 30-секундного graceful shutdown. Также проверьте, что у критичного пода нет `preStop`-хуков, замедляющих старт.
+**Реплика запустилась не мгновенно.** Убедитесь, что у capacity-overprovisioning подов стоит `terminationGracePeriodSeconds: 0` — иначе место освобождается только после 30-секундного graceful shutdown. Также проверьте, что у business-app нет `preStop`-хуков, замедляющих старт.
 
 ### Очистка
 
 ```bash
-kubectl delete -f manifests/critical-app.yaml
+kubectl delete -f manifests/keda/load-generator.yaml
+kubectl delete -f manifests/keda/scaledobject.yaml
+kubectl delete -f manifests/keda/business-app.yaml
 kubectl delete -f manifests/overprovisioning.yaml
 kubectl delete -f priorityclasses.yaml
+helm uninstall keda -n keda
 terraform destroy
 ```
 ## Важные нюансы для корректной работы
@@ -383,7 +395,7 @@ terraform destroy
 
 **Политика вытеснения.** По умолчанию свойство `preemptionPolicy` в PriorityClass имеет значение `PreemptLowerPriority`. Это именно то, что вам нужно (высокий вытесняет низкий, включая capacity-overprovisioning поды с отрицательным приоритетом). Альтернативное значение `Never` означает, что под с таким классом не будет вытеснять других — он честно ждёт в Pending, но для нашего паттерна нужен именно дефолт.
 
-**Graceful shutdown.** Вытеснение — это обычное удаление пода с соблюдением `terminationGracePeriodSeconds` и preStop-хуков. Значение по умолчанию — 30 секунд, и всё это время место на ноде считается занятым. Для capacity-overprovisioning подов graceful shutdown не нужен вовсе — там ставят `terminationGracePeriodSeconds: 0`, чтобы резерв освобождался мгновенно. А вот для критичных подов, которые вытесняют capacity-overprovisioning поды, важно, чтобы они корректно обрабатывали SIGTERM — иначе мгновенное вытеснение capacity-overprovisioning пода не гарантирует мгновенное освобождение места: реальная задержка будет ровно по `terminationGracePeriodSeconds` критичного пода.
+**Graceful shutdown.** Вытеснение — это обычное удаление пода с соблюдением `terminationGracePeriodSeconds` и preStop-хуков. Значение по умолчанию — 30 секунд, и всё это время место на ноде считается занятым. Для capacity-overprovisioning подов graceful shutdown не нужен вовсе — там ставят `terminationGracePeriodSeconds: 0`, чтобы резерв освобождался мгновенно. А вот для подов бизнес-приложений, которые вытесняют capacity-overprovisioning поды, важно, чтобы они корректно обрабатывали SIGTERM — иначе мгновенное вытеснение capacity-overprovisioning пода не гарантирует мгновенное освобождение места: реальная задержка будет ровно по `terminationGracePeriodSeconds` вытесняющего пода.
 
 **PodDisruptionBudget — best effort.** Планировщик старается не нарушать PDB при выборе жертв, но если жертв без нарушения PDB нет — вытеснение всё равно произойдёт. Не рассчитывайте на PDB как на защиту от приоритетного вытеснения: он ограничивает добровольные disruptions (drain, вытеснения при обновлениях), а не scheduler preemption.
 
@@ -403,13 +415,17 @@ Overprovisioning через capacity-overprovisioning поды — это про
 
 ## Итоги
 
-Мы развернули в Yandex Managed Kubernetes кластер с автоскейлингом, настроили отрицательный PriorityClass для capacity-overprovisioning подов — и пронаблюдали полный цикл: критичное приложение мгновенно вытеснило capacity-overprovisioning под, буфер ушёл в Pending, Cluster Autoscaler добавил ноду, и резерв восстановился. Паттерн node overprovisioning даёт «тёплый» резерв: место под будущий пик держится заранее, а при всплеске освобождается за секунды.
+Мы развернули в Yandex Managed Kubernetes кластер с автоскейлингом, настроили отрицательный PriorityClass для capacity-overprovisioning подов — и пронаблюдали полный цикл на живом бизнес-приложении: KEDA по RPS поднял реплики business-app, новые реплики мгновенно вытеснили capacity-overprovisioning поды, буфер ушёл в Pending, Cluster Autoscaler добавил ноду, и резерв восстановился. Паттерн node overprovisioning даёт «тёплый» резерв: место под будущий пик держится заранее, а при всплеске освобождается за секунды.
 
 Все конфигурации из статьи:
 
 - [INFRASTRUCTURE.md](INFRASTRUCTURE.md) — Terraform для кластера с `auto_scale` node group, Traefik и VictoriaMetrics K8s Stack
 - [priorityclasses.yaml](priorityclasses.yaml) — PriorityClass для capacity-overprovisioning подов с отрицательным значением
-- [manifests/critical-app.yaml](manifests/critical-app.yaml) — критичное приложение
 - [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml) — capacity-overprovisioning поды для «тёплого» резерва
+- [manifests/keda/business-app.yaml](manifests/keda/business-app.yaml) — бизнес-приложение (Deployment + Service)
+- [manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml) — KEDA ScaledObject, масштабирование по RPS из VictoriaMetrics
+- [manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml) — генератор нагрузки с профилем RPS «день/ночь»
+- [apps/business-app/](apps/business-app/) — исходники бизнес-приложения (Go)
+- [apps/load-generator/](apps/load-generator/) — исходники генератора нагрузки (Go)
 
 Главное, что стоит запомнить: приоритеты работают только при корректных `resources.requests`; **requests — триггер масштабирования, priority — право вытеснять**; поды без `priorityClassName` получают приоритет 0 и уже вытесняют capacity-overprovisioning поды с отрицательным значением; `auto_scale` в Yandex Managed K8s — это Cluster Autoscaler из коробки; а если скорость реакции важнее цены — capacity-overprovisioning поды с отрицательным приоритетом дают «тёплый» резерв мощностей.
