@@ -8,9 +8,11 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -167,18 +169,25 @@ func main() {
 
 	client := &http.Client{Timeout: envDurationOr("REQUEST_TIMEOUT", 10*time.Second)}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	log.Printf("load-generator: цель=%s профиль=%q repeat=%d", targetURL, profile, repeat)
 	iteration := 0
 	for {
 		iteration++
 		s := &stats{}
 		for _, st := range steps {
-			ctx, cancel := context.WithTimeout(context.Background(), st.duration+time.Minute)
-			runStep(ctx, client, targetURL, st, s)
+			stepCtx, cancel := context.WithTimeout(ctx, st.duration+time.Minute)
+			runStep(stepCtx, client, targetURL, st, s)
 			cancel()
 		}
 		total, success, failed := s.snapshot()
 		log.Printf("итерация %d завершена: запросов=%d успех=%d ошибок=%d", iteration, total, success, failed)
+		if ctx.Err() != nil {
+			log.Printf("получен сигнал завершения — останавливаемся")
+			return
+		}
 		if repeat > 0 && iteration >= repeat {
 			log.Printf("достигнут лимит итераций (%d) — завершаемся", repeat)
 			return
