@@ -19,7 +19,7 @@ docker push ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator
 - [ ] Подобрать эмпирически `threshold` (25 RPS/реплику) и профиль лестницы под ноду 2 vCPU: цель — чтобы каждая новая реплика реально упиралась в CPU.
 - [ ] Проверить имя HPA, который создаёт KEDA (обычно `keda-hpa-<scaledobject-name>`).
 - [ ] Решить, публиковать ли `values-vmks.yaml` в репозитории как полноценный файл вместо инструкции в README.
-- [ ] Возможно, зафиксировать тег образов в манифестах вместо `latest`.
+- [ ] Сделать версионирование образов `business-app` и `load-generator`: вместо `latest` закрепить в манифестах (`manifests/keda/business-app.yaml`, `manifests/keda/load-generator.yaml`) конкретный semver-тег, который пушит GitHub Actions (`${{ steps.semver.outputs.version }}`). Требует первого релиза — сейчас образов с конкретным тегом в GHCR нет, а CI ещё не отрабатывал.
 - [ ] Проверить значение PriorityClass для capacity-overprovisioning подов: `-1000` против cutoff Cluster Autoscaler (`--expendable-pods-priority-cutoff`, по умолчанию `-10`). Поды с приоритетом ниже cutoff не триггерят scale-up — ушедший в Pending capacity-overprovisioning под с `-1000` может не вызвать создание ноды. Официальный FAQ Cluster Autoscaler использует `value: -10`.
 - [ ] Перепроверить противоречие в README: «приоритет сам по себе не заставляет Cluster Autoscaler ничего делать» vs «Autoscaler увидит нехватку ресурсов для подов с приоритетом -1000». Связано с cutoff `-10` (пункт выше).
 - [ ] Перепроверить тег образа `registry.k8s.io/pause:3.10` (README и `manifests/overprovisioning.yaml`). Такого тега может не существовать.

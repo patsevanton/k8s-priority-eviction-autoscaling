@@ -259,7 +259,7 @@ KEDA добавляет в кластер горизонтальный авто�
 
 ```bash
 helm repo add kedacore https://kedacore.github.io/charts
-helm install keda kedacore/keda --namespace keda --create-namespace
+helm install keda kedacore/keda --namespace keda --create-namespace --version 2.20.2
 ```
 
 ### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
