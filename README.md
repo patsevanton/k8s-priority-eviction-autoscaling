@@ -1,8 +1,8 @@
 # PriorityClass, Cluster Autoscaler и «тёплый» резерв через capacity-overprovisioning поды в Kubernetes
 
-Ситуация, знакомая многим командам: в кластере Kubernetes живут обычные бизнес сервисы, нагрузка на которые днём растёт, а ночью падает. Обычно используют два плохих варианта: держать статический пул нод под дневной пик, которые ночью простаивают и стоят денег, или положиться на cluster autoscaling — и тогда при дневном росте нагрузки бизнес-поды проведут в статусе Pending до 10 минут, пока автоскейлер развернёт новую ноду.
+Ситуация, знакомая многим командам: в кластере Kubernetes живут обычные бизнес сервисы, нагрузка на которые днём растёт, а ночью падает. Обычно используют два плохих варианта: держать статический пул нод под дневной пик, которые ночью простаивают и стоят денег, или положиться на cluster autoscaling — и тогда при дневном росте нагрузки бизнес-поды проведут в статусе Pending до создания новой ноды.
 
-Проблема ожидания до 10 минут, пока Cluster Autoscaler развернёт новую ноду, решается паттерном [node overprovisioning](https://kubernetes.io/docs/tasks/administer-cluster/node-overprovisioning/), настраиваемым через PriorityClass и механизмы Cluster Autoscaler: мы **заранее** запускаем ничего не делающие capacity-overprovisioning поды (в документации Kubernetes они называются placeholder-подами), которые через `resources.requests` занимают небольшую часть ресурсов нод. Когда приходит нагрузка и реплики бизнес-приложений увеличиваются — поды бизнес-приложений немедленно занимают освободившееся место, вытесняя capacity-overprovisioning под за секунды. Вытесненный capacity-overprovisioning под уходит в Pending, Cluster Autoscaler добавляет ноду, и буфер восстанавливается сам.
+Проблема ожидания, пока Cluster Autoscaler развернёт новую ноду, решается паттерном [node overprovisioning](https://kubernetes.io/docs/tasks/administer-cluster/node-overprovisioning/), настраиваемым через PriorityClass и механизмы Cluster Autoscaler: мы **заранее** запускаем ничего не делающие capacity-overprovisioning поды (в документации Kubernetes они называются placeholder-подами), которые через `resources.requests` занимают небольшую часть ресурсов нод. Когда приходит нагрузка и реплики бизнес-приложений увеличиваются — поды бизнес-приложений немедленно занимают освободившееся место, вытесняя capacity-overprovisioning под за секунды. Вытесненный capacity-overprovisioning под уходит в Pending, Cluster Autoscaler добавляет ноду, и буфер восстанавливается сам.
 
 В этой статье разберём, как это устроено внутри, и развернём полный демо-стенд в Yandex Managed Kubernetes: от Terraform-кластера с автоскейлингом до живого вытеснения capacity-overprovisioning подов, которое можно наблюдать своими глазами в `kubectl get events`.
 
@@ -14,9 +14,9 @@
 
 **2. Вытеснение (Preemption).** Когда высокоприоритетный под не может разместиться, планировщик Kubernetes не просто оставляет его в Pending — он ищет ноды, где, удалив один или несколько подов с приоритетом ниже, чем у кандидата, можно освободить достаточно ресурсов — и вытесняет их. Приоритеты не суммируются: планировщик сравнивает приоритет каждого пода-жертвы с приоритетом кандидата по отдельности, а суммирует только освобождаемые ресурсы (`resources.requests`). Важный нюанс: планировщик сравнивает приоритеты только тогда, когда физически не может разместить под из-за нехватки запрошенных ресурсов (`resources.requests`). Без корректно выставленных requests вся эта механика не работает.
 
-**3. Автоскейлинг нод (Cluster Autoscaler).** Вытеснённый capacity-overprovisioning под (или любой другой, который не помещается) переходит в статус Pending. Cluster Autoscaler видит поды, которые не могут разместиться, и разворачивает новую ноду. Спустя до 10 минут (типичное время создания ноды в облаке) буфер восстанавливается.
+**3. Автоскейлинг нод (Cluster Autoscaler).** Вытеснённый capacity-overprovisioning под (или любой другой, который не помещается) переходит в статус Pending. Cluster Autoscaler видит поды, которые не могут разместиться, и разворачивает новую ноду. Буфер восстанавливается после того, как нода будет подготовлена в облаке.
 
-Получается замкнутый цикл: **запас capacity-overprovisioning подов занят на нодах → нагрузка растёт → реплики бизнес-приложений увеличиваются (например, через HPA) → capacity-overprovisioning под вытесняется за секунды → реальный под запущен → capacity-overprovisioning под в Pending → новая нода → буфер восстановлен**. Кластер переживает рост нагрузки без ручного вмешательства и без ожиданий до 10 минут.
+Получается замкнутый цикл: **запас capacity-overprovisioning подов занят на нодах → нагрузка растёт → реплики бизнес-приложений увеличиваются (например, через HPA) → capacity-overprovisioning под вытесняется за секунды → реальный под запущен → capacity-overprovisioning под в Pending → новая нода → буфер восстановлен**. Кластер переживает рост нагрузки без ручного вмешательства и без ожидания, пока в облаке подготовится новая нода.
 
 **Вариант A — диаграмма последовательности (кто кому что сигналит)**
 
@@ -164,7 +164,7 @@ spec:
 ```
 Ключевые детали:
 
-- **`value: -1000`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды — дефолтный PriorityClass не нужен.
+- **`value: -1000`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды — задавать глобальный default PriorityClass для всего кластера не нужно.
 - **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Общий буфер = `replicas × requests`. Готовый манифест для демо-стенда — [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml).
 - **`terminationGracePeriodSeconds: 0`.** Стандартные 30 секунд graceful shutdown — это 30 секунд задержки перед тем, как место освободится. Capacity-overprovisioning поду нечего «корректно завершать», поэтому выключаем ожидание.
 - **Pod anti-affinity** (`preferredDuringSchedulingIgnoredDuringExecution` по hostname) — «мягкое» правило, старающееся распределить capacity-overprovisioning поды по разным нодам. Без него весь буфер может осесть на одной ноде — и при её сбое вы теряете весь резерв разом.
@@ -178,7 +178,7 @@ spec:
 
 ### Trade-off: вы платите за скорость
 
-Capacity-overprovisioning поды не бесплатны: буфер — это простаивающие мощности, за которые идёт обычная оплата. Взамен вы покупаете скорость реакции кластера: секунды вместо минут. Паттерн окупается при непредсказуемых всплесках с жёсткими требованиями к времени развёртывания; при плавной предсказуемой нагрузке дешевле полагаться на обычный реактивный автоскейлинг.
+Capacity-overprovisioning поды не бесплатны: буфер — это простаивающие мощности, за которые идёт обычная оплата. Взамен вы покупаете скорость реакции кластера: секунды вместо нескольких минут — именно тех минут, которые ушли бы на провижининг новой ноды облаком. Паттерн окупается при непредсказуемых всплесках с жёсткими требованиями к времени развёртывания; при плавной предсказуемой нагрузке дешевле полагаться на обычный реактивный автоскейлинг.
 
 > Нюанс для других облаков: некоторые автоскейлеры трактуют `preferred` anti-affinity как жёсткое ограничение при масштабировании — число реплик Deployment с capacity-overprovisioning подами задаёт тем самым минимальное число нод. Классический Cluster Autoscaler (и Yandex Managed K8s) так не делает: для него anti-affinity — только предпочтение при размещении.
 
@@ -199,6 +199,7 @@ $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                      VALUE        GLOBAL-DEFAULT   AGE
 system-cluster-critical   2000000000   false            10m
 system-node-critical      2000001000   false            10m
+# capacity-overprovisioning ещё нет — создадим его на шаге 1
 
 # Мониторинг (namespace vmks): vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
 $ kubectl get pods -n vmks
@@ -289,7 +290,7 @@ LAST SEEN   TYPE      REASON      OBJECT                          MESSAGE
 ```
 Ключевое событие — `Preempted ... By default/business-app-...`: планировщик явно показывает, кто кого вытеснил.
 
-Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (до 10 минут, в рамках `max = 3`):
+Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (провижининг ноды в облаке — минуты, в рамках `max = 3`):
 
 ```bash
 $ kubectl get nodes -w
@@ -335,7 +336,7 @@ kubectl describe pod <pod> | grep -A3 "Requests"
 ```bash
 kubectl get hpa keda-hpa-business-app -o yaml
 kubectl run -it --rm curl --image=curlimages/curl --restart=Never -- \
-  curl -s 'http://vmsingle-vmks.vmks.svc.cluster.local:8428/select/0/prometheus/api/v1/query?query=sum(rate(business_app_http_requests_total{route="root"}[1m]))'
+  curl -s 'http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428/select/0/prometheus/api/v1/query?query=sum(rate(business_app_http_requests_total{route="root"}[1m]))'
 ```
 Если метрика пустая — проверьте, что vmagent скрейпит `/metrics` business-app (при необходимости добавьте в `manifests/keda/business-app.yaml` аннотации `prometheus.io/scrape: "true"`, `prometheus.io/port: "8080"`, `prometheus.io/path: "/metrics"`).
 
@@ -403,7 +404,7 @@ Overprovisioning через capacity-overprovisioning поды — это про
 
 ## Итоги
 
-Мы развернули в Yandex Managed Kubernetes кластер с автоскейлингом, настроили отрицательный PriorityClass для capacity-overprovisioning подов — и пронаблюдали полный цикл на живом бизнес-приложении: KEDA по RPS поднял реплики business-app, новые реплики мгновенно вытеснили capacity-overprovisioning поды, буфер ушёл в Pending, Cluster Autoscaler добавил ноду, и резерв восстановился. Паттерн node overprovisioning даёт «тёплый» резерв: место под будущий пик держится заранее, а при всплеске освобождается за секунды.
+Мы развернули в Yandex Managed Kubernetes кластер с автоскейлингом, настроили отрицательный PriorityClass для capacity-overprovisioning подов — и пронаблюдали полный цикл на живом бизнес-приложении: KEDA по RPS поднял реплики business-app, новые реплики мгновенно вытеснили capacity-overprovisioning поды, буфер ушёл в Pending, Cluster Autoscaler добавил ноду, и резерв восстановился. Паттерн node overprovisioning даёт «тёплый» резерв: место под будущий пик держится заранее, а при всплеске освобождается за секунды (вместо минут ожидания, пока облако подготовит новую ноду).
 
 Все конфигурации из статьи:
 

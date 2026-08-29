@@ -22,7 +22,7 @@ spec:
   triggers:
   - type: prometheus
     metadata:
-      serverAddress: http://vmsingle-vmks.vmks.svc.cluster.local:8428
+      serverAddress: http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428
       query: |
         sum(rate(business_app_http_requests_total{route="root"}[1m]))
       threshold: "25" # Одна реплика обслуживает ~25 RPS

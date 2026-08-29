@@ -37,7 +37,7 @@
 2. **victoria-metrics-k8s-stack** (`helm_release.vmks`, чарт 0.90.2) в namespace `vmks` —
    минимальный стек мониторинга: vmagent + vmsingle + Grafana + node-exporter +
    kube-state-metrics. vmsingle — источник метрик RPS для KEDA ScaledObject
-   (`http://vmsingle-vmks.vmks.svc.cluster.local:8428`, см. `manifests/keda/scaledobject.yaml`).
+   (`http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428`, см. `manifests/keda/scaledobject.yaml`).
 
 Values рендерятся Terraform'ом из шаблона [vmks-values.yaml.tftpl](vmks-values.yaml.tftpl)
 в `vmks-values.yaml` (файл в `.gitignore`). Что в них задано:
