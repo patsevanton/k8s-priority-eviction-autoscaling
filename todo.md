@@ -8,7 +8,7 @@
 - `apps/load-generator/` — генератор нагрузки на Go: гоняет лестницу RPS «день/ночь» на `TARGET_URL` по профилю `LOAD_PROFILE` (формат `rps/длительность;...`), `REPEAT` — число итераций (0 — бесконечно).
 - `apps/.gitignore` — игнор локальных бинарей сборки.
 - `.github/workflows/docker.yml` — CI: semver-релиз и сборка обоих образов в GHCR (`ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/business-app`, `.../load-generator`).
-- `manifests/keda/business-app.yaml` — Deployment + Service бизнес-приложения (requests 900m/1Gi — как у pause-пода, чтобы реплика гарантированно вытесняла его).
+- `manifests/keda/business-app.yaml` — Deployment + Service бизнес-приложения (requests 900m/1Gi — как у capacity-overprovisioning пода, чтобы реплика гарантированно вытесняла его).
 - `manifests/keda/scaledobject.yaml` — KEDA ScaledObject: Prometheus scaler, запрос `sum(rate(business_app_http_requests_total{route="root"}[1m]))`, threshold 25 RPS на реплику, min 1 / max 4.
 - `manifests/keda/load-generator.yaml` — Deployment генератора нагрузки (профиль: 0 → 5 → 20 → 60 → 100 → 20 → 0 RPS, бесконечный повтор).
 
@@ -83,7 +83,7 @@ kubectl get deployment business-app -w
 # HPA, созданный KEDA
 kubectl get hpa keda-hpa-business-app -w
 
-# Вытеснение pause-подов
+# Вытеснение capacity-overprovisioning подов
 kubectl get events --sort-by=.lastTimestamp | grep -E 'Preempted|Scaled'
 
 # Прометеус-запрос для проверки метрики RPS
@@ -91,7 +91,7 @@ kubectl run -it --rm curl --image=curlimages/curl --restart=Never -- \
   curl -s 'http://vmsingle-vmks.vmks.svc.cluster.local:8428/select/0/prometheus/api/v1/query?query=sum(rate(business_app_http_requests_total[1m]))'
 ```
 
-Ожидаемый цикл: рост RPS по лестнице → KEDA поднимает реплики (каждая с requests 900m/1Gi) → новые поды вытесняют pause-поды (приоритет -1000) → вытесненные pause-поды в Pending → Cluster Autoscaler добавляет ноду → буфер восстанавливается. При спаде RPS до 0 (ночь) KEDA возвращёт реплики к 1, CA удаляет лишние ноды.
+Ожидаемый цикл: рост RPS по лестнице → KEDA поднимает реплики (каждая с requests 900m/1Gi) → новые поды вытесняют capacity-overprovisioning поды (приоритет -1000) → вытесненные capacity-overprovisioning поды в Pending → Cluster Autoscaler добавляет ноду → буфер восстанавливается. При спаде RPS до 0 (ночь) KEDA возвращёт реплики к 1, CA удаляет лишние ноды.
 
 ## Открытые вопросы
 

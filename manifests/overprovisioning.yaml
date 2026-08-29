@@ -1,4 +1,4 @@
-# Pause-поды для предварительного резервирования мощностей (overprovisioning).
+# Capacity-overprovisioning поды для предварительного резервирования мощностей (overprovisioning).
 # Pause-контейнер не делает ничего — его единственная задача через resources.requests
 # «занимать место» на нодах, которое мгновенно освободится при вытеснении.
 #
@@ -22,11 +22,11 @@ spec:
         app: overprovisioning
     spec:
       # Отрицательный приоритет: любой под без priorityClassName (приоритет 0)
-      # вытеснит pause-под мгновенно.
-      priorityClassName: overprovisioning-placeholder
+      # вытеснит capacity-overprovisioning под мгновенно.
+      priorityClassName: capacity-overprovisioning
       # Не ждём 30 секунд graceful shutdown — место должно освобождаться сразу
       terminationGracePeriodSeconds: 0
-      # Распределяем pause-поды по разным нодам, чтобы резерв
+      # Распределяем capacity-overprovisioning поды по разным нодам, чтобы резерв
       # не сваливался на одну и ту же ноду
       affinity:
         podAntiAffinity:
@@ -42,7 +42,7 @@ spec:
         image: registry.k8s.io/pause:3.10
         resources:
           requests:
-            cpu: 900m # Объём резерва на один pause-под
+            cpu: 900m # Объём резерва на один capacity-overprovisioning под
             memory: 1Gi
           limits:
             cpu: 900m

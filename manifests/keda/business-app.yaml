@@ -1,6 +1,6 @@
 # Бизнес-приложение: HTTP API на Go с метриками Prometheus на /metrics.
 # Масштабируется по RPS через KEDA (см. scaledobject.yaml). Реплики бизнес-приложения
-# вытесняют pause-поды overprovisioning (у тех приоритет -1000, здесь — 0).
+# вытесняют capacity-overprovisioning поды overprovisioning (у тех приоритет -1000, здесь — 0).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,7 +42,7 @@ spec:
           periodSeconds: 10
         resources:
           requests:
-            cpu: 900m # Совпадает с размером резерва pause-пода: реплика вытеснит его
+            cpu: 900m # Совпадает с размером резерва capacity-overprovisioning пода: реплика вытеснит его
             memory: 1Gi
           limits:
             cpu: "1"

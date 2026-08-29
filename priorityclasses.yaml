@@ -1,9 +1,9 @@
-# PriorityClass для pause-подов (overprovisioning): отрицательное значение
+# PriorityClass для capacity-overprovisioning подов (overprovisioning): отрицательное значение
 # делает их первыми кандидатами на вытеснение — ниже только системные классы.
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: overprovisioning-placeholder
+  name: capacity-overprovisioning
 value: -1000 # Отрицательный приоритет: вытесняются раньше всех остальных
 globalDefault: false
-description: "Отрицательный приоритет для pause-подов предварительного резервирования мощностей"
+description: "Отрицательный приоритет для capacity-overprovisioning подов предварительного резервирования мощностей"
