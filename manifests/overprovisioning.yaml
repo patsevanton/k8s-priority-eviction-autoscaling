@@ -3,7 +3,7 @@
 # «занимать место» на нодах, которое мгновенно освободится при вытеснении.
 #
 # Математика резерва для демо-стенда (нода 2 vCPU / 4 ГБ, системные резервы ~600m CPU):
-#   replicas 2 × (900m CPU / 1Gi) ≈ одна «тёплая» нода под будущий пик.
+#   replicas 2 × (1 CPU / 1Gi) ≈ одна «тёплая» нода под будущий пик.
 # Измените replicas и requests под размер вашего типичного всплеска нагрузки.
 apiVersion: apps/v1
 kind: Deployment
@@ -42,8 +42,8 @@ spec:
         image: registry.k8s.io/pause:3.10
         resources:
           requests:
-            cpu: 900m # Объём резерва на один capacity-overprovisioning под
+            cpu: 1 # 1 ядро
             memory: 1Gi
           limits:
-            cpu: 900m
+            cpu: 1 # 1 ядро
             memory: 1Gi
