@@ -64,7 +64,7 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: capacity-overprovisioning
-value: -1000
+value: -10
 globalDefault: false
 description: "Отрицательный приоритет для capacity-overprovisioning подов резервирования мощностей"
 ```
@@ -111,7 +111,7 @@ spec:
 ```
 Ключевые детали:
 
-- **`value: -1000`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды — задавать глобальный default PriorityClass для всего кластера не нужно.
+- **`value: -10`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды — задавать глобальный default PriorityClass для всего кластера не нужно. Значение `-10` выбрано не случайно, а ровно на границе cutoff Cluster Autoscaler (`--expendable-pods-priority-cutoff`, по умолчанию `-10`): чтобы одновременно и быть вытесняемым, и продолжать вызывать scale-up, когда capacity-overprovisioning под уходит в Pending. Подробнее про порог ниже в разделе «Кому можно выставлять PriorityClass ниже -10».
 - **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Общий буфер = `replicas × requests`. Готовый манифест для демо-стенда — [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml).
 - **`terminationGracePeriodSeconds: 0`.** Стандартные 30 секунд graceful shutdown — это 30 секунд задержки перед тем, как место освободится. Capacity-overprovisioning поду нечего «корректно завершать», поэтому выключаем ожидание.
 - **Pod anti-affinity** (`preferredDuringSchedulingIgnoredDuringExecution` по hostname) — «мягкое» правило, старающееся распределить capacity-overprovisioning поды по разным нодам. Без него весь буфер может осесть на одной ноде — и при её сбое вы теряете весь резерв разом.
@@ -177,7 +177,7 @@ kubectl apply -f priorityclasses.yaml
 ```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                       VALUE        GLOBAL-DEFAULT   AGE
-capacity-overprovisioning  -1000        false            5s    ← для capacity-overprovisioning подов
+capacity-overprovisioning  -10          false            5s    ← для capacity-overprovisioning подов
 system-cluster-critical    2000000000   false            10m
 system-node-critical       2000001000   false            10m
 ```
@@ -189,7 +189,7 @@ $ kubectl get pod test-pod -o jsonpath='{.spec.priority} {"\n"}'
 0
 $ kubectl delete pod test-pod
 ```
-Приоритет 0 выше -1000 у capacity-overprovisioning подов — этого достаточно для вытеснения.
+Приоритет 0 выше -10 у capacity-overprovisioning подов — этого достаточно для вытеснения.
 
 ### Шаг 2. Запускаем capacity-overprovisioning поды
 
@@ -229,7 +229,7 @@ kubectl apply -f manifests/keda/scaledobject.yaml
 kubectl apply -f manifests/keda/load-generator.yaml
 ```
 
-- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 1 CPU / 1Gi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -1000).
+- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 1 CPU / 1Gi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
 - `scaledobject.yaml` — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
 - `load-generator` — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
 
@@ -242,7 +242,7 @@ $ kubectl get deployment business-app -w
 $ kubectl get hpa keda-hpa-business-app -w
 ```
 
-Когда лестница RPS поднимается выше 25 RPS, KEDA добавляет реплику. Новая реплика (requests 1 CPU/1Gi, приоритет 0) не помещается на занятые ноды — планировщик вытесняет capacity-overprovisioning под (приоритет -1000). Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу:
+Когда лестница RPS поднимается выше 25 RPS, KEDA добавляет реплику. Новая реплика (requests 1 CPU/1Gi, приоритет 0) не помещается на занятые ноды — планировщик вытесняет capacity-overprovisioning под (приоритет -10). Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу:
 
 ```bash
 $ kubectl get events --sort-by=.lastTimestamp | grep -E 'Preempted|Scaled'
@@ -290,7 +290,7 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordon
 
 ## Важные нюансы для корректной работы
 
-**Настройка Cluster Autoscaler.** Убедитесь, что у вас включён автоскейлинг нод. Когда capacity-overprovisioning поды уйдут в Pending, Autoscaler увидит нехватку ресурсов для подов с приоритетом -1000 и начнёт создавать новую ноду — восстанавливать буфер. В Yandex Managed K8s это делается через `auto_scale` в node group; в self-hosted — установкой Cluster Autoscaler с явным указанием минимального и максимального размера групп нод.
+**Настройка Cluster Autoscaler.** Убедитесь, что у вас включён автоскейлинг нод. Когда capacity-overprovisioning поды уйдут в Pending, Autoscaler увидит нехватку ресурсов для подов с приоритетом -10 и начнёт создавать новую ноду — восстанавливать буфер. В Yandex Managed K8s это делается через `auto_scale` в node group; в self-hosted — установкой Cluster Autoscaler с явным указанием минимального и максимального размера групп нод.
 
 **Запросы ресурсов (Requests).** Вытеснение сработает только в том случае, если у ваших подов чётко прописаны `resources.requests`. Kubernetes сравнивает приоритеты только тогда, когда физически не может разместить под из-за нехватки запрошенных ресурсов. Под без requests для планировщика «весит ноль» — он не вытеснит никого и сам не станет причиной масштабирования. Это самая частая причина, почему приоритеты «не работают». Полезно запомнить разделение ролей: **requests — триггер масштабирования, priority — право вытеснять**. Приоритет сам по себе не заставляет Cluster Autoscaler создавать ноды — тот реагирует только на поды в состоянии `Unschedulable` из-за нехватки ресурсов.
 
@@ -303,6 +303,18 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordon
 Парадокс: под без requests одновременно «неуязвим» для вытеснения планировщиком и «самый уязвимый» для eviction kubelet'ом — мониторинг без requests умрёт первым именно в момент инцидента, когда он нужнее всего. Вывод: для схемы «приоритеты + overprovisioning» requests должны стоять у всех участников — и у вытесняющих, и у жертв. Если LimitRange не используется, контролируйте это на уровне манифестов и values (например, проверяйте в CI, что у каждого контейнера указаны requests, — включая компоненты мониторинга вроде vmagent, vmsingle, alertmanager).
 
 **Диапазон значений и имена PriorityClass.** Значение `value` — 32-битное целое от -2147483648 до 1000000000; всё, что выше миллиарда, зарезервировано за встроенными системными классами (`system-cluster-critical` = 2000000000, `system-node-critical` = 2000001000). Имя класса должно быть валидным DNS-именем и не может начинаться с префикса `system-`. Отрицательные значения — не хак, а штатный механизм, официально используемый для capacity-overprovisioning подов.
+
+### Кому можно выставлять PriorityClass ниже -10
+
+Ключевой порог здесь — флаг Cluster Autoscaler `--expendable-pods-priority-cutoff` (по умолчанию `-10`). Cluster Autoscaler рассматривает под в Pending как повод развернуть новую ноду, только если его приоритет **выше или равен** этому порогу. Поды с приоритетом **ниже** cutoff считаются «расходными» (expendable) и scale-up не триггерят — то есть **если у пода PriorityClass меньше `-10`, Cluster Autoscaler не станет создавать под него новую ноду**: под честно ждёт, пока свободное место появится само (после спада нагрузки или после того, как нода добавится по другому поводу).
+
+Поэтому `value` меньше `-10` — не ошибка сама по себе, а осознанный выбор для тех подов, которым **запрещено** тратить деньги кластера на новую ноду:
+
+- **Низкоприоритетные batch/фоновые задачи**, которым не важно, когда они отработают (nightly-джобы, отчёты, обработка очередей). Они должны ждать свободного места, а не поднимать кластер.
+- **Внутренние утилиты и «мусорные» поды**, которые не должны влиять на размер кластера вообще.
+- **Поды в namespace, где масштабирование нежелательно** — например, staging/dev-нагрузка, которую держат на том, что осталось.
+
+Правило простое: **буфер (capacity-overprovisioning) ставим ровно на cutoff (`-10`), а всё, что не должно провоцировать scale-up, — строго ниже**. Если опустить capacity-overprovisioning поды ниже `-10` (как часто советуют, задавая `-1000`), то при вытеснении ушедший в Pending под не вызовет создание ноды — и «тёплый» резерв не восстановится. Именно поэтому в этом демо используется `-10`, а не `-1000`.
 
 **Защита от циклического перезапуска (Flapping).** Если новая нода создаётся слишком долго, capacity-overprovisioning поды будут находиться в Pending. Как только нода поднимется, они запустятся там и восстановят буфер. Убедитесь, что лимиты автоскейлера позволяют расширять кластер (`max` в auto_scale не должен упираться в квоту облака), и что развертывание подов не блокируется чем-то ещё — например, лимитами namespace (ResourceQuota) или отсутствием доступа к реестру образов.
 

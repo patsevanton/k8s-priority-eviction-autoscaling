@@ -1,6 +1,6 @@
 # Бизнес-приложение: HTTP API на Go с метриками Prometheus на /metrics.
 # Масштабируется по RPS через KEDA (см. scaledobject.yaml). Реплики бизнес-приложения
-# вытесняют capacity-overprovisioning поды overprovisioning (у тех приоритет -1000, здесь — 0).
+# вытесняют capacity-overprovisioning поды overprovisioning (у тех приоритет -10, здесь — 0).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
