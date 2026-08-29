@@ -187,42 +187,49 @@ Capacity-overprovisioning поды не бесплатны: буфер — эт�
 
 ## Демо: вытеснение в живом кластере
 
-Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что кластер уже развёрнут через Terraform ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) и kubeconfig получен. Terraform генерирует values-файл `vmks-values.yaml`; стек мониторинга VictoriaMetrics (vmagent + vmsingle + Grafana за Traefik) ставится вручную через `helm` в namespace `vmks` — из vmsingle KEDA берёт метрику RPS для масштабирования business-app (см. `manifests/keda/scaledobject.yaml`).
-
-Стенд: одна нода 2 vCPU / 4 ГБ, node group `auto_scale { min = 1, max = 3 }` — это и есть включённый Cluster Autoscaler. В Yandex Managed K8s отдельная установка Cluster Autoscaler не нужна: `auto_scale` вместо `fixed_scale` — и платформа запускает управляемый автоскейлер.
+Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что k8s кластер c динамическими/autoscale нодами уже развёрнут.
 
 ### Шаг 0. Проверяем стенд
+
+Сначала в k8s 1 нода.
 
 ```bash
 $ kubectl get nodes
 NAME                       STATUS   ROLES    AGE   VERSION
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   3m    v1.33.x
+```
 
+```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                      VALUE        GLOBAL-DEFAULT   AGE
 system-cluster-critical   2000000000   false            10m
 system-node-critical      2000001000   false            10m
-# capacity-overprovisioning ещё нет — создадим его на шаге 1
+```
 
-# Мониторинг (namespace vmks): ставим стек вручную через helm (values уже сгенерированы terraform'ом)
+```
 $ helm upgrade --install vmks \
     oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
     --namespace vmks --create-namespace \
     --wait --version 0.90.2 --timeout 15m \
     -f vmks-values.yaml
+```
+
 
 # vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
+```
 $ kubectl get pods -n vmks
 NAME                                          READY   STATUS    RESTARTS   AGE
 vmsingle-vmks-victoria-metrics-k8s-stack-0    1/1     Running   0          5m
 vmagent-vmks-victoria-metrics-k8s-stack-0     1/1     Running   0          5m
 ...
 ```
-### Шаг 1. Применяем PriorityClass
 
+### Шаг 1. Применяем PriorityClass
 ```bash
 kubectl apply -f priorityclasses.yaml
 ```
+
+
 ```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                       VALUE        GLOBAL-DEFAULT   AGE
@@ -230,8 +237,8 @@ capacity-overprovisioning  -1000        false            5s    ← для capaci
 system-cluster-critical    2000000000   false            10m
 system-node-critical       2000001000   false            10m
 ```
-Проверяем, что приоритет применился к обычному поду (контейнер `pause` — минимальный образ, который ничего не делает):
 
+Проверяем, что приоритет применился к обычному поду (контейнер `pause` — минимальный образ, который ничего не делает):
 ```bash
 $ kubectl run test-pod --image=registry.k8s.io/pause:3.10 --restart=Never
 $ kubectl get pod test-pod -o jsonpath='{.spec.priority} {"\n"}'
@@ -258,6 +265,7 @@ NAME                       STATUS   ROLES    AGE
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода под capacity-overprovisioning под
 ```
+
 Анти-аффинность в манифесте распределяет capacity-overprovisioning поды по разным нодам, поэтому один занял новую ноду, а второй остался в Pending — он и удерживает Autoscaler от scale-down обратно к одной ноде.
 
 ### Шаг 3. Устанавливаем KEDA
@@ -298,10 +306,10 @@ LAST SEEN   TYPE      REASON      OBJECT                          MESSAGE
 20s         Normal    Preempted   pod/overprovisioning-...-a1b2c  By default/business-app-...-7g8h9 on node cl1...-uabc
 35s         Normal    Killing     pod/overprovisioning-...-a1b2c  Stopping container pause
 ```
+
 Ключевое событие — `Preempted ... By default/business-app-...`: планировщик явно показывает, кто кого вытеснил.
 
 Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (провижининг ноды в облаке — минуты, в рамках `max = 3`):
-
 ```bash
 $ kubectl get nodes -w
 NAME                       STATUS   ROLES    AGE
@@ -309,8 +317,8 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   25m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   9m
 cl1v2fmpkgn4srb2b1mm-wxyz   Ready    <none>   47s   ← новая нода под буфер
 ```
-На новой ноде capacity-overprovisioning поды снова становятся Running — «тёплый» резерв восстановлен:
 
+На новой ноде capacity-overprovisioning поды снова становятся Running — «тёплый» резерв восстановлен:
 ```bash
 $ kubectl get pods -o wide
 NAME                              READY   STATUS    NODE
@@ -318,6 +326,7 @@ business-app-...-7g8h9            1/1     Running   cl1...-uabc
 overprovisioning-...-a1b2c        1/1     Running   cl1...-wxyz   ← буфер снова готов
 overprovisioning-...-d3e4f        1/1     Running   cl1...-wxyz
 ```
+
 Полный цикл замкнулся: **рост RPS → KEDA поднимает реплики → мгновенное вытеснение → реальный под работает → новая нода → буфер восстановлен**.
 
 ### Шаг 6. Спад нагрузки и scale-down
@@ -332,49 +341,9 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready                      <none>   35m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready,SchedulingDisabled   <none>   17m   ← cordoned
 # затем нода удаляется
 ```
+
 > Cluster Autoscaler удаляет ноду, только если все её поды можно перенести на другие ноды. Не забудьте, что scale-down требует, чтобы суммарные requests помещались на оставшиеся ноды.
 
-### Что пошло не так? (Траблшутинг)
-
-**Вытеснение не происходит, новые реплики business-app в Pending.** Проверьте requests у Deployment: без `resources.requests` планировщик считает под «бесплатным» и не вытесняет никого.
-
-```bash
-kubectl describe pod <pod> | grep -A3 "Requests"
-```
-**KEDA не поднимает реплики.** Проверьте, что метрика RPS доходит до KEDA: HPA, созданный KEDA, и запрос к vmsingle:
-
-```bash
-kubectl get hpa keda-hpa-business-app -o yaml
-kubectl run -it --rm curl --image=curlimages/curl --restart=Never -- \
-  curl -s 'http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428/select/0/prometheus/api/v1/query?query=sum(rate(business_app_http_requests_total{route="root"}[1m]))'
-```
-Если метрика пустая — проверьте, что vmagent скрейпит `/metrics` business-app (при необходимости добавьте в `manifests/keda/business-app.yaml` аннотации `prometheus.io/scrape: "true"`, `prometheus.io/port: "8080"`, `prometheus.io/path: "/metrics"`).
-
-**Capacity-overprovisioning поды не создают новую ноду.** Проверьте, что node group действительно с auto_scale, и посмотрите события:
-
-```bash
-yc managed-kubernetes node-group list
-yc managed-kubernetes node-group get <node-group-id> --show-log
-```
-**Под в Pending навсегда.** Cluster Autoscaler не может расширить группу сверх `max` (в нашем демо — 3) или упёрся в квоту каталога. Проверьте лимиты:
-
-```bash
-yc resource-manager folder list-limits --name <folder>
-```
-**Реплика запустилась не мгновенно.** Убедитесь, что у capacity-overprovisioning подов стоит `terminationGracePeriodSeconds: 0` — иначе место освобождается только после 30-секундного graceful shutdown. Также проверьте, что у business-app нет `preStop`-хуков, замедляющих старт.
-
-### Очистка
-
-```bash
-kubectl delete -f manifests/keda/load-generator.yaml
-kubectl delete -f manifests/keda/scaledobject.yaml
-kubectl delete -f manifests/keda/business-app.yaml
-kubectl delete -f manifests/overprovisioning.yaml
-kubectl delete -f priorityclasses.yaml
-helm uninstall keda -n keda
-helm uninstall vmks -n vmks
-terraform destroy
-```
 ## Важные нюансы для корректной работы
 
 **Настройка Cluster Autoscaler.** Убедитесь, что у вас включён автоскейлинг нод. Когда capacity-overprovisioning поды уйдут в Pending, Autoscaler увидит нехватку ресурсов для подов с приоритетом -1000 и начнёт создавать новую ноду — восстанавливать буфер. В Yandex Managed K8s это делается через `auto_scale` в node group; в self-hosted — установкой Cluster Autoscaler с явным указанием минимального и максимального размера групп нод.
