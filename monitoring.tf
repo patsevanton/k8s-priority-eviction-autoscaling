@@ -1,12 +1,20 @@
 # Мониторинг: Traefik (ingress) + VictoriaMetrics K8s Stack.
 #
-# VictoriaMetrics ставится через helm_release в namespace `vmks` (victoria-metrics-k8s-stack:
-# vmagent + vmsingle + Grafana + node-exporter + kube-state-metrics). vmsingle — источник
-# метрик для KEDA ScaledObject (http://vmsingle-vmks.vmks.svc.cluster.local:8428),
+# VictoriaMetrics ставится ВРУЧНУЮ через helm в namespace `vmks`
+# (victoria-metrics-k8s-stack: vmagent + vmsingle + Grafana + node-exporter +
+# kube-state-metrics), как в других проектах. vmsingle — источник метрик для KEDA
+# ScaledObject (http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428),
 # Grafana открывается через Traefik по FQDN из sslip.io.
 #
-# Values рендерятся из vmks-values.yaml.tftpl (подстановка ingress_public_ip) и
-# дополнительно пишутся в vmks-values.yaml — можно обновить релиз вручную через helm.
+# Terraform только генерирует values-файл vmks-values.yaml из шаблона
+# vmks-values.yaml.tftpl (подстановка ingress_public_ip). Дальше релиз
+# устанавливается вручную:
+#
+#   helm upgrade --install vmks \
+#     oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
+#     --namespace vmks --create-namespace \
+#     --wait --version 0.90.2 --timeout 15m \
+#     -f vmks-values.yaml
 
 locals {
   vmks_values = templatefile("${path.module}/vmks-values.yaml.tftpl", {
@@ -24,8 +32,7 @@ resource "local_file" "write_vmks_values" {
 # (yandex_vpc_address.ingress), из которого через sslip.io формируется FQDN Grafana.
 resource "helm_release" "traefik" {
   name             = "traefik"
-  chart            = "traefik"
-  repository       = "https://traefik.github.io/charts"
+  chart            = "oci://ghcr.io/traefik/helm/traefik"
   namespace        = "traefik"
   create_namespace = true
   version          = "41.3.0"
@@ -48,27 +55,6 @@ resource "helm_release" "traefik" {
   depends_on = [
     yandex_kubernetes_cluster.priority,
     yandex_kubernetes_node_group.k8s_node_group,
-  ]
-}
-
-# VictoriaMetrics K8s Stack в namespace vmks (vmagent + vmsingle + Grafana).
-# vmalert и alertmanager отключены в values (демо-стенд), scrape-job и recording-правила
-# недоступных control-plane компонентов Yandex Managed K8s отключены (см. vmks-values.yaml.tftpl).
-resource "helm_release" "vmks" {
-  name             = "vmks"
-  chart            = "victoria-metrics-k8s-stack"
-  repository       = "https://victoriametrics.github.io/helm-charts/"
-  namespace        = "vmks"
-  create_namespace = true
-  version          = "0.90.2"
-  wait             = true
-  timeout          = 900
-
-  values = [local.vmks_values]
-
-  depends_on = [
-    helm_release.traefik,
-    local_file.write_vmks_values,
   ]
 }
 

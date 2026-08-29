@@ -10,7 +10,7 @@
 
 Прежде чем идти к практике, важно понять, что приоритетное вытеснение — это не одна фича, а результат работы трёх компонентов Kubernetes, которые существуют независимо друг от друга:
 
-**1. Приоритет пода (PriorityClass).** Каждый под имеет приоритет: явный из `priorityClassName`, иначе 0 (в этом проекте `globalDefault` не задан). Это число хранится в `pod.spec.priority` и учитывается в двух местах: планировщиком при выборе жертвы вытеснения и kubelet при eviction под давлением ресурсов.
+**1. Приоритет пода (PriorityClass).** Каждый под имеет приоритет 0 либо `priorityClassName` или приоритет выставляемый `globalDefault` из какого-либо PriorityClass. Приоритет учитывается в двух местах: планировщиком при выборе жертвы вытеснения и kubelet при eviction под давлением ресурсов.
 
 **2. Вытеснение (Preemption).** Когда высокоприоритетный под не может разместиться, планировщик Kubernetes не просто оставляет его в Pending — он ищет ноды, где, удалив один или несколько подов с приоритетом ниже, чем у кандидата, можно освободить достаточно ресурсов — и вытесняет их. Приоритеты не суммируются: планировщик сравнивает приоритет каждого пода-жертвы с приоритетом кандидата по отдельности, а суммирует только освобождаемые ресурсы (`resources.requests`). Важный нюанс: планировщик сравнивает приоритеты только тогда, когда физически не может разместить под из-за нехватки запрошенных ресурсов (`resources.requests`). Без корректно выставленных requests вся эта механика не работает.
 
@@ -187,7 +187,7 @@ Capacity-overprovisioning поды не бесплатны: буфер — эт�
 
 ## Демо: вытеснение в живом кластере
 
-Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что кластер уже развёрнут через Terraform ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) и kubeconfig получен. Terraform заодно ставит в namespace `vmks` стек мониторинга VictoriaMetrics (vmagent + vmsingle + Grafana за Traefik) — из vmsingle KEDA берёт метрику RPS для масштабирования business-app (см. `manifests/keda/scaledobject.yaml`).
+Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что кластер уже развёрнут через Terraform ([INFRASTRUCTURE.md](INFRASTRUCTURE.md)) и kubeconfig получен. Terraform генерирует values-файл `vmks-values.yaml`; стек мониторинга VictoriaMetrics (vmagent + vmsingle + Grafana за Traefik) ставится вручную через `helm` в namespace `vmks` — из vmsingle KEDA берёт метрику RPS для масштабирования business-app (см. `manifests/keda/scaledobject.yaml`).
 
 Стенд: одна нода 2 vCPU / 4 ГБ, node group `auto_scale { min = 1, max = 3 }` — это и есть включённый Cluster Autoscaler. В Yandex Managed K8s отдельная установка Cluster Autoscaler не нужна: `auto_scale` вместо `fixed_scale` — и платформа запускает управляемый автоскейлер.
 
@@ -204,7 +204,14 @@ system-cluster-critical   2000000000   false            10m
 system-node-critical      2000001000   false            10m
 # capacity-overprovisioning ещё нет — создадим его на шаге 1
 
-# Мониторинг (namespace vmks): vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
+# Мониторинг (namespace vmks): ставим стек вручную через helm (values уже сгенерированы terraform'ом)
+$ helm upgrade --install vmks \
+    oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
+    --namespace vmks --create-namespace \
+    --wait --version 0.90.2 --timeout 15m \
+    -f vmks-values.yaml
+
+# vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
 $ kubectl get pods -n vmks
 NAME                                          READY   STATUS    RESTARTS   AGE
 vmsingle-vmks-victoria-metrics-k8s-stack-0    1/1     Running   0          5m
@@ -365,6 +372,7 @@ kubectl delete -f manifests/keda/business-app.yaml
 kubectl delete -f manifests/overprovisioning.yaml
 kubectl delete -f priorityclasses.yaml
 helm uninstall keda -n keda
+helm uninstall vmks -n vmks
 terraform destroy
 ```
 ## Важные нюансы для корректной работы

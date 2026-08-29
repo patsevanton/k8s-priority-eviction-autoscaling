@@ -24,19 +24,21 @@
   остаётся региональным (3 зоны отказоустойчивости)
 - **Traefik** — ingress-контроллер; балансировщик получает статический публичный IP
   (`ip-dns.tf`), из которого через sslip.io формируется FQDN Grafana
-- **VictoriaMetrics K8s Stack** — устанавливается Terraform'ом через `helm_release`
-  в namespace `vmks` (`monitoring.tf`)
+- **VictoriaMetrics K8s Stack** — устанавливается вручную через `helm` в namespace
+  `vmks`; Terraform только генерирует values-файл `vmks-values.yaml` (`monitoring.tf`)
 
 ## VictoriaMetrics K8s Stack
 
-`terraform apply` устанавливает две вещи через провайдер Helm (`monitoring.tf`):
+`terraform apply` через провайдер Helm устанавливает только ingress-контроллер и
+генерирует values-файл для стек мониторинга (`monitoring.tf`):
 
 1. **Traefik** (`helm_release.traefik`) — ingress-контроллер в namespace `traefik`.
    Service типа LoadBalancer получает статический публичный IP из `yandex_vpc_address.ingress`.
 
-2. **victoria-metrics-k8s-stack** (`helm_release.vmks`, чарт 0.90.2) в namespace `vmks` —
-   минимальный стек мониторинга: vmagent + vmsingle + Grafana + node-exporter +
-   kube-state-metrics. vmsingle — источник метрик RPS для KEDA ScaledObject
+2. **victoria-metrics-k8s-stack** — минимальный стек мониторинга: vmagent + vmsingle +
+   Grafana + node-exporter + kube-state-metrics. Ставится **вручную** через `helm`
+   (чарт 0.90.2) в namespace `vmks`, как в других проектах. vmsingle — источник метрик
+   RPS для KEDA ScaledObject
    (`http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428`, см. `manifests/keda/scaledobject.yaml`).
 
 Values рендерятся Terraform'ом из шаблона [vmks-values.yaml.tftpl](vmks-values.yaml.tftpl)
@@ -53,13 +55,15 @@ Values рендерятся Terraform'ом из шаблона [vmks-values.yaml
   для скрейпинга — иначе vmagent плодит `ScrapePoolHasNoTargets`, а vmalert —
   `RecordingRulesNoData`.
 
-Если нужно обновить релиз вручную (Terraform уже сгенерировал `vmks-values.yaml`):
+После `terraform apply` (Terraform уже сгенерировал `vmks-values.yaml`) стек ставится
+вручную:
 
 ```bash
-helm upgrade --install vmks victoria-metrics-k8s-stack/victoria-metrics-k8s-stack \
+helm upgrade --install vmks \
+  oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
   --namespace vmks --create-namespace \
-  --version 0.90.2 \
-  --wait --values vmks-values.yaml
+  --wait --version 0.90.2 --timeout 15m \
+  -f vmks-values.yaml
 ```
 
 ## Требования
@@ -67,7 +71,7 @@ helm upgrade --install vmks victoria-metrics-k8s-stack/victoria-metrics-k8s-stac
 - [yc CLI](https://yandex.cloud/ru/docs/cli/), настроенный и аутентифицированный (`yc init`)
 - [Terraform](https://www.terraform.io/) >= 1.3
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [Helm](https://helm.sh/) >= 3 (для ручных операций с релизами)
+- [Helm](https://helm.sh/) >= 3 (для установки VictoriaMetrics K8s Stack)
 
 ## Запуск
 
@@ -97,8 +101,9 @@ NAME                       STATUS   ROLES    AGE   VERSION
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   2m    v1.33.x
 ```
 
-Terraform также устанавливает Traefik и VictoriaMetrics K8s Stack (см. раздел выше).
-Проверяем поды мониторинга и доступ к Grafana:
+Terraform устанавливает Traefik и генерирует `vmks-values.yaml`; VictoriaMetrics K8s
+Stack ставится вручную через `helm` (см. раздел выше). Проверяем поды мониторинга и
+доступ к Grafana:
 
 ```bash
 $ kubectl get pods -n vmks
