@@ -2,38 +2,27 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
 
-// step — одна ступень лестницы нагрузки: целевой RPS на duration.
-type step struct {
-	rps      int
-	duration time.Duration
-}
+const (
+	minRPS  = 0
+	maxRPS  = 100
+	modeRPS = 60
+)
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
-	}
-	return def
-}
-
-func envIntOr(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
 	}
 	return def
 }
@@ -47,33 +36,24 @@ func envDurationOr(key string, def time.Duration) time.Duration {
 	return def
 }
 
-// parseSteps разбирает профиль лестницы в формате "rps/длительность;rps/длительность;..."
-// Например: "0/2m;5/3m;20/3m;60/3m;100/5m;20/3m;0/2m" — ночь, рост, пик, спад, ночь.
-func parseSteps(s string) ([]step, error) {
-	var steps []step
-	for _, part := range strings.Split(s, ";") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		kv := strings.SplitN(part, "/", 2)
-		if len(kv) != 2 {
-			return nil, fmt.Errorf("неверный формат ступени %q: ожидается rps/длительность", part)
-		}
-		rps, err := strconv.Atoi(strings.TrimSpace(kv[0]))
-		if err != nil {
-			return nil, fmt.Errorf("неверный RPS в ступени %q: %w", part, err)
-		}
-		d, err := time.ParseDuration(strings.TrimSpace(kv[1]))
-		if err != nil {
-			return nil, fmt.Errorf("неверная длительность в ступени %q: %w", part, err)
-		}
-		steps = append(steps, step{rps: rps, duration: d})
+// rpsAt возвращает целевой RPS в момент elapsed после старта.
+// RPS плавно растёт от minRPS до maxRPS по S-образной кривой — обратной
+// функции распределения закона Симпсона (треугольное распределение, мода modeRPS):
+// медленно в начале, быстрее в середине, снова медленно к концу.
+// После CYCLE удерживается максимум maxRPS.
+func rpsAt(elapsed, cycle time.Duration) float64 {
+	if cycle <= 0 {
+		return maxRPS
 	}
-	if len(steps) == 0 {
-		return nil, fmt.Errorf("пустой профиль нагрузки")
+	u := float64(elapsed) / float64(cycle)
+	if u >= 1 {
+		return maxRPS
 	}
-	return steps, nil
+	mode := float64(modeRPS-minRPS) / float64(maxRPS-minRPS)
+	if u <= mode {
+		return minRPS + math.Sqrt(u*float64((maxRPS-minRPS)*(modeRPS-minRPS)))
+	}
+	return maxRPS - math.Sqrt((1-u)*float64((maxRPS-minRPS)*(maxRPS-modeRPS)))
 }
 
 type stats struct {
@@ -100,97 +80,66 @@ func (s *stats) snapshot() (total, success, failed int) {
 	return s.total, s.success, s.failed
 }
 
-func runStep(ctx context.Context, client *http.Client, targetURL string, st step, s *stats) {
-	if st.rps <= 0 {
-		log.Printf("ступень: 0 RPS (%s) — пауза, ночь", st.duration)
-		select {
-		case <-time.After(st.duration):
-		case <-ctx.Done():
-		}
+func send(ctx context.Context, client *http.Client, targetURL string, s *stats) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		s.record(false)
 		return
 	}
-
-	interval := time.Second / time.Duration(st.rps)
-	log.Printf("ступень: %d RPS на %s (интервал между запросами %s)", st.rps, st.duration, interval)
-
-	stepStart := time.Now()
-	var lastTick time.Time
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if time.Since(stepStart) >= st.duration {
-			return
-		}
-
-		// Ровный темп отправки со случайным джиттером ±20%,
-		// чтобы трафик выглядел как реальный, а не метроном.
-		if lastTick.IsZero() {
-			lastTick = time.Now()
-		}
-		jitter := interval / 5
-		delay := interval + time.Duration(rand.Int63n(int64(2*jitter)+1)) - jitter
-		if wait := time.Until(lastTick.Add(delay)); wait > 0 {
-			select {
-			case <-time.After(wait):
-			case <-ctx.Done():
-				return
-			}
-		}
-		lastTick = time.Now()
-
-		go func() {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-			if err != nil {
-				s.record(false)
-				return
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				s.record(false)
-				return
-			}
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			s.record(resp.StatusCode >= 200 && resp.StatusCode < 400)
-		}()
+	resp, err := client.Do(req)
+	if err != nil {
+		s.record(false)
+		return
 	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	s.record(resp.StatusCode >= 200 && resp.StatusCode < 400)
 }
 
 func main() {
 	targetURL := envOr("TARGET_URL", "http://business-app:8080/")
-	profile := envOr("LOAD_PROFILE", "0/2m;5/3m;20/3m;60/3m;100/5m;20/3m;0/2m")
-	repeat := envIntOr("REPEAT", 0) // 0 — бесконечно
-
-	steps, err := parseSteps(profile)
-	if err != nil {
-		log.Fatalf("LOAD_PROFILE: %v", err)
-	}
+	cycle := envDurationOr("CYCLE", 20*time.Minute)
 
 	client := &http.Client{Timeout: envDurationOr("REQUEST_TIMEOUT", 10*time.Second)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("load-generator: цель=%s профиль=%q repeat=%d", targetURL, profile, repeat)
-	iteration := 0
-	for {
-		iteration++
-		s := &stats{}
-		for _, st := range steps {
-			stepCtx, cancel := context.WithTimeout(ctx, st.duration+time.Minute)
-			runStep(stepCtx, client, targetURL, st, s)
-			cancel()
+	log.Printf("load-generator: цель=%s cycle=%s minRPS=%d maxRPS=%d modeRPS=%d", targetURL, cycle, minRPS, maxRPS, modeRPS)
+
+	s := &stats{}
+	start := time.Now()
+	var lastTick time.Time
+	for ctx.Err() == nil {
+		rps := rpsAt(time.Since(start), cycle)
+		if rps <= 0 {
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+			}
+			continue
 		}
-		total, success, failed := s.snapshot()
-		log.Printf("итерация %d завершена: запросов=%d успех=%d ошибок=%d", iteration, total, success, failed)
-		if ctx.Err() != nil {
-			log.Printf("получен сигнал завершения — останавливаемся")
-			return
+
+		interval := time.Duration(float64(time.Second) / rps)
+		if lastTick.IsZero() {
+			lastTick = time.Now()
 		}
-		if repeat > 0 && iteration >= repeat {
-			log.Printf("достигнут лимит итераций (%d) — завершаемся", repeat)
-			return
+
+		// Ровный темп отправки со случайным джиттером ±20%,
+		// чтобы трафик выглядел как реальный, а не метроном.
+		jitter := interval / 5
+		delay := interval + time.Duration(rand.Int63n(int64(2*jitter)+1)) - jitter
+		if wait := time.Until(lastTick.Add(delay)); wait > 0 {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+			}
 		}
+		lastTick = time.Now()
+
+		go send(ctx, client, targetURL, s)
 	}
+
+	total, success, failed := s.snapshot()
+	log.Printf("получен сигнал завершения — останавливаемся: запросов=%d успех=%d ошибок=%d", total, success, failed)
 }

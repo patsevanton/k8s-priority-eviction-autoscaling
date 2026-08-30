@@ -1,8 +1,8 @@
-# Генератор нагрузки: гоняет на business-app лестницу RPS «день/ночь».
+# Генератор нагрузки: плавно наращивает RPS на business-app по S-образной кривой —
+# обратной функции распределения закона Симпсона (треугольное распределение, мода 60).
 #
-# Профиль по умолчанию (LOAD_PROFILE):
-#   ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м)
-#   → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор.
+# За CYCLE (по умолчанию 20м) RPS растёт с 0 до 100: медленно в начале, быстрее
+# в середине, снова медленно к концу. После CYCLE удерживается максимум 100 RPS.
 #
 # Рост RPS → KEDA поднимает реплики business-app → новые поды вытесняют
 # capacity-overprovisioning поды (приоритет -10) → Cluster Autoscaler добавляет ноды.
@@ -24,14 +24,12 @@ spec:
     spec:
       containers:
       - name: load-generator
-        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.0.0
+        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.1.0
         env:
         - name: TARGET_URL
           value: "http://business-app:8080/"
-        - name: LOAD_PROFILE
-          value: "0/2m;5/3m;20/3m;60/3m;100/5m;20/3m;0/2m"
-        - name: REPEAT
-          value: "0" # 0 — повторять профиль бесконечно
+        - name: CYCLE
+          value: "20m" # длительность нарастания RPS 0→100, затем удержание максимума
         resources:
           requests:
             cpu: 100m
