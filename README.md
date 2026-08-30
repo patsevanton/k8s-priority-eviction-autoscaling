@@ -88,7 +88,7 @@ spec:
 ```
 Ключевые детали:
 
-- **`value: -10`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды. Если указать приоритет для capacity-overprovisioning поды ниже `-10`, то при вытеснении ушедший в Pending под не вызовет создание ноды.
+- **`value: -10`.** Отрицательный приоритет гарантирует, что обычные поды вытесняют capacity-overprovisioning поды: поды без `priorityClassName` имеют приоритет **0**, то есть выше. Не ставьте значение ниже `-10` — иначе вытесненный и ушедший в Pending под не запустит создание ноды.
 - **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Ресурсы которые могут отдать capacity-overprovisioning поды = `replicas × requests`.
 - **`terminationGracePeriodSeconds: 0`.** Стандартные 30 секунд graceful shutdown — это 30 секунд задержки перед тем, как место освободится. Capacity-overprovisioning поду нечего «корректно завершать», поэтому выключаем ожидание.
 - **Pod anti-affinity** (`preferredDuringSchedulingIgnoredDuringExecution` по hostname) — «мягкое» правило, старающееся распределить capacity-overprovisioning поды по разным нодам.
