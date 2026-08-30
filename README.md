@@ -44,7 +44,6 @@ kind: PriorityClass
 metadata:
   name: capacity-overprovisioning
 value: -10
-globalDefault: false
 description: "Отрицательный приоритет для capacity-overprovisioning подов резервирования мощностей"
 ```
 ### Шаг 2. Разверните Deployment с capacity-overprovisioning подами
@@ -82,11 +81,11 @@ spec:
         image: registry.k8s.io/pause:3.10 # Контейнер, который просто «спит»
         resources:
           requests:
-            cpu: 1
-            memory: 1Gi
+            cpu: 250m
+            memory: 250Mi
           limits:
-            cpu: 1
-            memory: 1Gi
+            cpu: 250m
+            memory: 250Mi
 ```
 Ключевые детали:
 

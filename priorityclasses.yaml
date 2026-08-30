@@ -5,5 +5,4 @@ kind: PriorityClass
 metadata:
   name: capacity-overprovisioning
 value: -10 # Отрицательный приоритет: вытесняются раньше обычных подов, но не ниже cutoff Cluster Autoscaler
-globalDefault: false
 description: "Отрицательный приоритет для capacity-overprovisioning подов предварительного резервирования мощностей"
