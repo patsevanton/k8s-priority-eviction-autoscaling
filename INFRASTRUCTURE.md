@@ -14,8 +14,25 @@
 1. **Traefik** (`helm_release.traefik`) — ingress-контроллер в namespace `traefik`.
    Service типа LoadBalancer получает статический публичный IP из `yandex_vpc_address.ingress`.
 
-После `terraform apply` стек ставится вручную — команда установки приведена
-в [README.md](README.md).
+## VictoriaMetrics K8s Stack
+
+Terraform генерирует values-файл `vmks-values.yaml` из шаблона
+[vmks-values.yaml.tftpl](vmks-values.yaml.tftpl) (файл `vmks-values.yaml` — в
+`.gitignore`). Что в них задано:
+
+- **Grafana за Traefik** по адресу `http://grafana.<IP>.sslip.io` (IP — публичный адрес
+  балансировщика Traefik; sslip.io — бесплатный wildcard-DNS, резолвится без настройки).
+- **Отключены vmalert и alertmanager** — демо-стенду на нодах 2 vCPU / 4 ГБ нужен
+  минимальный стек.
+- **Отключены scrape-job и recording-правила для control-plane компонентов Yandex
+  Managed K8s** (`kubeControllerManager`, `kubeScheduler`, `kubeEtcd`, группы правил
+  `etcd`, `kubernetes-system-scheduler`, `kubernetes-system-controller-manager`,
+  `kube-scheduler.rules`): master управляемый и вне кластера, эти компоненты недоступны
+  для скрейпинга — иначе vmagent плодит `ScrapePoolHasNoTargets`, а vmalert —
+  `RecordingRulesNoData`.
+
+После `terraform apply` (Terraform уже сгенерировал `vmks-values.yaml`) стек ставится
+вручную — команда установки приведена в [README.md](README.md).
 
 ## Требования
 

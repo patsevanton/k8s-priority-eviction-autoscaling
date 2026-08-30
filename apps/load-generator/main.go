@@ -16,8 +16,8 @@ import (
 
 const (
 	minRPS  = 0
-	maxRPS  = 100
-	modeRPS = 60
+	maxRPS  = 1000
+	modeRPS = 600
 )
 
 func envOr(key, def string) string {
