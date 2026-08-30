@@ -108,6 +108,8 @@ helm install keda kedacore/keda --namespace keda --create-namespace --version 2.
 ```
 
 ### Шаг 2. Применяем PriorityClass
+
+Конфиг указан выше.
 ```bash
 kubectl apply -f priorityclasses.yaml
 ```
@@ -123,6 +125,7 @@ system-node-critical       2000001000   false            10m
 
 ### Шаг 2. Запускаем capacity-overprovisioning поды
 
+Конфиг указан выше.
 ```bash
 kubectl apply -f manifests/overprovisioning.yaml
 ```
@@ -139,8 +142,6 @@ NAME                       STATUS   ROLES    AGE
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода под capacity-overprovisioning под
 ```
-
-
 
 ### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
