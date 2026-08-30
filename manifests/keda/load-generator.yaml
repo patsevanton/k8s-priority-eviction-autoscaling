@@ -1,8 +1,13 @@
-# Генератор нагрузки: плавно наращивает RPS на business-app по S-образной кривой —
-# обратной функции распределения закона Симпсона (треугольное распределение, мода 600).
+# Генератор нагрузки: плавно наращивает RPS на business-app по гладкой S-образной
+# кривой smoothstep — без излома в точке перегиба: медленно в начале, быстрее
+# в середине, снова медленно к концу.
 #
-# За CYCLE (по умолчанию 20м) RPS растёт с 0 до 1000: медленно в начале, быстрее
-# в середине, снова медленно к концу. После CYCLE удерживается максимум 1000 RPS.
+# За CYCLE (по умолчанию 30м) RPS растёт с MIN_RPS до MAX_RPS. MIDPOINT задаёт
+# точку перегиба в долях от CYCLE (0.5 — симметричный подъём: 50% роста ровно
+# в середине). После CYCLE удерживается максимум MAX_RPS.
+#
+# Пик 600 RPS → ceil(600/25) = 24 реплики × 250m CPU = 6000m — помещается
+# в 5 нод по 2 vCPU с запасом под системные поды.
 #
 # Рост RPS → KEDA поднимает реплики business-app → новые поды вытесняют
 # capacity-overprovisioning поды (приоритет -10) → Cluster Autoscaler добавляет ноды.
@@ -24,16 +29,22 @@ spec:
     spec:
       containers:
       - name: load-generator
-        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.2.0
+        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.3.0
         env:
         - name: TARGET_URL
           value: "http://business-app:8080/"
         - name: CYCLE
-          value: "20m" # длительность нарастания RPS 0→1000, затем удержание максимума
+          value: "30m" # длительность нарастания RPS MIN_RPS→MAX_RPS, затем удержание максимума
+        - name: MIN_RPS
+          value: "0"
+        - name: MAX_RPS
+          value: "600" # пик нагрузки: ceil(600/25) = 24 реплики, помещается в 5 нод
+        - name: MIDPOINT
+          value: "0.5" # точка перегиба S-кривой в долях CYCLE: 50% роста ровно в середине
         resources:
           requests:
-            cpu: 100m
+            cpu: 250m
             memory: 128Mi
           limits:
-            cpu: 200m
+            cpu: 500m
             memory: 256Mi

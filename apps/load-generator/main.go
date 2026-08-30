@@ -4,20 +4,14 @@ import (
 	"context"
 	"io"
 	"log"
-	"math"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
-)
-
-const (
-	minRPS  = 0
-	maxRPS  = 1000
-	modeRPS = 600
 )
 
 func envOr(key, def string) string {
@@ -36,12 +30,33 @@ func envDurationOr(key string, def time.Duration) time.Duration {
 	return def
 }
 
+func envFloatOr(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return def
+}
+
+// smoothstep — гладкая ступенька 0→1 без излома в начале и конце.
+func smoothstep(t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	return 6*t*t*t*t*t - 15*t*t*t*t + 10*t*t*t
+}
+
 // rpsAt возвращает целевой RPS в момент elapsed после старта.
-// RPS плавно растёт от minRPS до maxRPS по S-образной кривой — обратной
-// функции распределения закона Симпсона (треугольное распределение, мода modeRPS):
-// медленно в начале, быстрее в середине, снова медленно к концу.
+// RPS плавно растёт от minRPS до maxRPS по гладкой S-образной кривой smoothstep
+// (без излома): медленно в начале, быстрее в середине, снова медленно к концу.
+// midpoint задаёт точку перегиба в долях от CYCLE (0.5 — симметричный подъём:
+// 50% подъёма ровно в середине; меньше 0.5 — ранний подъём, больше 0.5 — поздний).
 // После CYCLE удерживается максимум maxRPS.
-func rpsAt(elapsed, cycle time.Duration) float64 {
+func rpsAt(elapsed, cycle time.Duration, minRPS, maxRPS, midpoint float64) float64 {
 	if cycle <= 0 {
 		return maxRPS
 	}
@@ -49,11 +64,16 @@ func rpsAt(elapsed, cycle time.Duration) float64 {
 	if u >= 1 {
 		return maxRPS
 	}
-	mode := float64(modeRPS-minRPS) / float64(maxRPS-minRPS)
-	if u <= mode {
-		return minRPS + math.Sqrt(u*float64((maxRPS-minRPS)*(modeRPS-minRPS)))
+	if u <= midpoint {
+		if midpoint <= 0 {
+			return minRPS
+		}
+		return minRPS + (maxRPS-minRPS)*0.5*smoothstep(u/midpoint)
 	}
-	return maxRPS - math.Sqrt((1-u)*float64((maxRPS-minRPS)*(maxRPS-modeRPS)))
+	if midpoint >= 1 {
+		return minRPS
+	}
+	return minRPS + (maxRPS-minRPS)*0.5*(1+smoothstep((u-midpoint)/(1-midpoint)))
 }
 
 type stats struct {
@@ -98,20 +118,23 @@ func send(ctx context.Context, client *http.Client, targetURL string, s *stats) 
 
 func main() {
 	targetURL := envOr("TARGET_URL", "http://business-app:8080/")
-	cycle := envDurationOr("CYCLE", 20*time.Minute)
+	cycle := envDurationOr("CYCLE", 30*time.Minute)
+	minRPS := envFloatOr("MIN_RPS", 0)
+	maxRPS := envFloatOr("MAX_RPS", 600)
+	midpoint := envFloatOr("MIDPOINT", 0.5)
 
 	client := &http.Client{Timeout: envDurationOr("REQUEST_TIMEOUT", 10*time.Second)}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("load-generator: цель=%s cycle=%s minRPS=%d maxRPS=%d modeRPS=%d", targetURL, cycle, minRPS, maxRPS, modeRPS)
+	log.Printf("load-generator: цель=%s cycle=%s minRPS=%v maxRPS=%v midpoint=%v", targetURL, cycle, minRPS, maxRPS, midpoint)
 
 	s := &stats{}
 	start := time.Now()
 	var lastTick time.Time
 	for ctx.Err() == nil {
-		rps := rpsAt(time.Since(start), cycle)
+		rps := rpsAt(time.Since(start), cycle, minRPS, maxRPS, midpoint)
 		if rps <= 0 {
 			select {
 			case <-time.After(time.Second):

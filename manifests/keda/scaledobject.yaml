@@ -4,7 +4,7 @@
 #
 # Математика масштабирования:
 #   желаемые реплики = ceil(суммарный RPS / 25)
-#   25 RPS → 1 реплика, 300 RPS → 12 реплик, 1000 RPS → 40 реплик.
+#   25 RPS → 1 реплика, 300 RPS → 12 реплик, 600 RPS → 24 реплики.
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -13,7 +13,7 @@ spec:
   scaleTargetRef:
     name: business-app
   minReplicaCount: 1 # Ночью (0 RPS) держим одну реплику
-  maxReplicaCount: 60 # Потолок под пик 1000 RPS: желаемые реплики = 1000/25 = 40
+  maxReplicaCount: 60 # Потолок под пик 600 RPS: желаемые реплики = 600/25 = 24
   pollingInterval: 15 # Как часто опрашиваем метрику (секунды)
   cooldownPeriod: 120 # Не отпускаем реплики сразу после падения RPS
   fallback: # Если VictoriaMetrics недоступен — держим текущее число реплик

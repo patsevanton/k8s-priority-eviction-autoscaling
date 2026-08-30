@@ -157,15 +157,15 @@ kubectl apply -f manifests/keda/load-generator.yaml
 ```
 
 - `business-app` ([manifests/keda/business-app.yaml](manifests/keda/business-app.yaml), исходники: [apps/business-app/](apps/business-app/)) — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
-- `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 60; пик 1000 RPS → 40 реплик).
-- `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — плавно наращивает RPS на business-app по S-образной кривой (обратная функция распределения закона Симпсона, треугольное распределение с модой 600): за `CYCLE` (20м) RPS растёт с 0 до 1000 — медленно в начале, быстрее в середине, снова медленно к концу, после чего удерживает максимум.
+- `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 60; пик 600 RPS → 24 реплики).
+- `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — плавно наращивает RPS на business-app по гладкой S-образной кривой smoothstep (без излома в точке перегиба): за `CYCLE` (30м) RPS растёт с 0 до 600 — медленно в начале, быстрее в середине, снова медленно к концу, после чего удерживает максимум. Параметры графика (`MIN_RPS`, `MAX_RPS`, `MIDPOINT`, `CYCLE`) вынесены в переменные окружения манифеста.
 
 ```mermaid
 xychart-beta
-    title "RPS генератора нагрузки — S-кривая (закон Симпсона, мода 600)"
-    x-axis "время (минуты)" 0 --> 20
-    y-axis "RPS" 0 --> 1000
-    line [0, 173, 244, 300, 346, 387, 424, 458, 489, 519, 547, 574, 600, 625, 653, 683, 717, 755, 800, 858, 1000]
+    title "RPS генератора нагрузки — гладкая S-кривая (smoothstep, точка перегиба 0.5)"
+    x-axis "время (минуты)" 0 --> 30
+    y-axis "RPS" 0 --> 600
+    line [0, 3, 17, 49, 95, 150, 205, 251, 283, 297, 300, 303, 317, 349, 395, 450, 505, 551, 583, 597, 600]
 ```
 
 ### Шаг 6. Наблюдаем полный цикл: рост → вытеснение
