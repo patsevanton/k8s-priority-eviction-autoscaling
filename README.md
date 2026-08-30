@@ -89,7 +89,7 @@ spec:
 Ключевые детали:
 
 - **`value: -10`.** Отрицательный приоритет гарантирует, что capacity-overprovisioning под будет первой жертвой вытеснения: поды без `priorityClassName` получают приоритет **0**, то есть уже выше capacity-overprovisioning подов. Этого достаточно, чтобы обычные поды вытесняли capacity-overprovisioning поды. Если указать приоритет для capacity-overprovisioning поды ниже `-10`, то при вытеснении ушедший в Pending под не вызовет создание ноды.
-- **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Ресурсы которые могут отдать capacity-overprovisioning поды = `replicas × requests`. Готовый манифест для демо-стенда — [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml).
+- **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Ресурсы которые могут отдать capacity-overprovisioning поды = `replicas × requests`.
 - **`terminationGracePeriodSeconds: 0`.** Стандартные 30 секунд graceful shutdown — это 30 секунд задержки перед тем, как место освободится. Capacity-overprovisioning поду нечего «корректно завершать», поэтому выключаем ожидание.
 - **Pod anti-affinity** (`preferredDuringSchedulingIgnoredDuringExecution` по hostname) — «мягкое» правило, старающееся распределить capacity-overprovisioning поды по разным нодам.
 
@@ -97,7 +97,7 @@ spec:
 
 Здесь легко запутаться, поэтому разделим роли явно:
 
-- **`resources.requests` capacity-overprovisioning пода — триггер scale-up.** Приоритет сам по себе не заставляет Cluster Autoscaler ничего делать: автоскейлер реагирует только на поды в состоянии `Unschedulable` из-за нехватки ресурсов. Capacity-overprovisioning под с requests 1 CPU / 1Gi, который не помещается, — это и есть сигнал «нужна нода».
+- **`resources.requests` capacity-overprovisioning пода — триггер scale-up.** Приоритет сам по себе не заставляет Cluster Autoscaler ничего делать: автоскейлер реагирует только на поды в состоянии `Unschedulable` из-за нехватки ресурсов. Capacity-overprovisioning под с requests 250m CPU / 250Mi, который не помещается, — это и есть сигнал «нужна нода».
 - **Отрицательный `priority` — включатель мгновенного вытеснения.** Он гарантирует, что занятый capacity-overprovisioning подом объём будет отдан новому поду немедленно, без ожидания.
 
 ### Экономия ночью и утром
@@ -162,7 +162,7 @@ system-node-critical       2000001000   false            10m
 ```bash
 kubectl apply -f manifests/overprovisioning.yaml
 ```
-Две реплики с requests 1 CPU / 1Gi каждая не помещаются на стартовую ноду (600m CPU и ~1 ГБ уже уходят на системные поды и резервы kubelet) — Cluster Autoscaler разворачивает под них вторую ноду:
+Две реплики с requests 250m CPU / 250Mi каждая — Cluster Autoscaler разворачивает под них вторую ноду:
 
 ```bash
 $ kubectl get pods -o wide
@@ -196,7 +196,7 @@ kubectl apply -f manifests/keda/load-generator.yaml
 kubectl apply -f manifests/keda/vmservicescrape.yaml
 ```
 
-- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 1 CPU / 1Gi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
+- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
 - `scaledobject.yaml` — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
 - `load-generator` — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
 
@@ -209,7 +209,7 @@ $ kubectl get deployment business-app -w
 $ kubectl get hpa keda-hpa-business-app -w
 ```
 
-Когда лестница RPS поднимается выше 25 RPS, KEDA добавляет реплику. Новая реплика (requests 1 CPU/1Gi, приоритет 0) не помещается на занятые ноды — планировщик вытесняет capacity-overprovisioning под (приоритет -10). Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу:
+Когда лестница RPS поднимается выше 25 RPS, KEDA добавляет реплику. Новая реплика (requests 250m CPU/250Mi, приоритет 0) не помещается на занятые ноды — планировщик вытесняет capacity-overprovisioning под (приоритет -10). Благодаря `terminationGracePeriodSeconds: 0` место освобождается сразу:
 
 ```bash
 $ kubectl get events --sort-by=.lastTimestamp | grep -E 'Preempted|Scaled'
@@ -220,7 +220,7 @@ LAST SEEN   TYPE      REASON      OBJECT                          MESSAGE
 
 Ключевое событие — `Preempted ... By default/business-app-...`: планировщик явно показывает, кто кого вытеснил.
 
-Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (провижининг ноды в облаке — минуты, в рамках `max = 3`):
+Вытесненный capacity-overprovisioning под уходит в Pending — это сигнал для Cluster Autoscaler развернуть новую ноду (провижининг ноды в облаке — минуты, в рамках `max = 5`):
 ```bash
 $ kubectl get nodes -w
 NAME                       STATUS   ROLES    AGE
