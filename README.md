@@ -129,14 +129,20 @@ system-node-critical       2000001000   false            10m
 ```bash
 kubectl apply -f manifests/overprovisioning.yaml
 ```
-Две реплики с requests 250m CPU / 250Mi каждая — Cluster Autoscaler разворачивает под них вторую ноду:
+Две реплики с requests 250m CPU / 250Mi каждая — резерв суммарно 500m CPU / 500Mi. На начально «пустой» ноде (allocatable ~1930m CPU) обе реплики помещаются вместе, поэтому сразу после применения оба пода Running:
 
 ```bash
 $ kubectl get pods -o wide
 NAME                              READY   STATUS    NODE
-overprovisioning-...-a1b2c        1/1     Running   cl1...-uabc   ← «тёплая» нода
-overprovisioning-...-d3e4f        0/1     Pending                 ← второй capacity-overprovisioning под ждёт
+overprovisioning-...-a1b2c        1/1     Running   cl1...-uabc
+overprovisioning-...-d3e4f        1/1     Running   cl1...-uabc
+```
 
+Вытеснение и масштабирование нод начнутся позже, когда бизнес-нагрузка заполнит ноду (см. Шаг 6): новая реплика business-app вытеснит capacity-overprovisioning под, тот уйдёт в Pending, и только тогда Cluster Autoscaler развернёт новую ноду. Здесь мы лишь создаём «тёплый» резерв заранее.
+
+Если же нода уже заполнена другими подами и второму capacity-overprovisioning поду не хватает места, он сразу уйдёт в Pending — и Cluster Autoscaler развернёт ноду уже на этом шаге:
+
+```bash
 $ kubectl get nodes
 NAME                       STATUS   ROLES    AGE
 cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
