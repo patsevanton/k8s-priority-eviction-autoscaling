@@ -34,6 +34,8 @@ flowchart TD
 
 Настройка состоит из двух шагов: PriorityClass для capacity-overprovisioning подов и Deployment с контейнером `pause`.
 
+> **Значения в примерах — не константы, а отправная точка.** Все числовые параметры ниже вы выставляете сами под своё приложение и инфраструктуру: `threshold` в RPS на реплику, `resources.requests/limits` бизнес-приложения и capacity-overprovisioning подов, число реплик (`replicas`) overprovisioning, профиль нагрузки генератора (`MIN_RPS`/`MAX_RPS`/`CYCLE`/`MIDPOINT`) и размер нод. В демо мы взяли ноду 2 vCPU / 4 ГБ, `threshold` = 25 RPS/реплику и запросы 250m CPU / 250Mi как разумные стартовые значения.
+
 ### Шаг 1. Создайте PriorityClass для capacity-overprovisioning подов
 
 Для capacity-overprovisioning подов создайте класс с **отрицательным значением** — благодаря этому они становятся первой жертвой вытеснения:
