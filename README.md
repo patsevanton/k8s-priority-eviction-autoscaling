@@ -157,15 +157,6 @@ system-cluster-critical    2000000000   false            10m
 system-node-critical       2000001000   false            10m
 ```
 
-Проверяем, что приоритет применился к обычному поду (контейнер `pause` — минимальный образ, который ничего не делает):
-```bash
-$ kubectl run test-pod --image=registry.k8s.io/pause:3.10 --restart=Never
-$ kubectl get pod test-pod -o jsonpath='{.spec.priority} {"\n"}'
-0
-$ kubectl delete pod test-pod
-```
-Приоритет 0 выше -10 у capacity-overprovisioning подов — этого достаточно для вытеснения.
-
 ### Шаг 2. Запускаем capacity-overprovisioning поды
 
 ```bash
