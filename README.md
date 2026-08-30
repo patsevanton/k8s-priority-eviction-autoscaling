@@ -163,8 +163,8 @@ $ helm upgrade --install vmks \
 ```
 $ kubectl get pods -n vmks
 NAME                                          READY   STATUS    RESTARTS   AGE
-vmsingle-vmks-victoria-metrics-k8s-stack-0    1/1     Running   0          5m
-vmagent-vmks-victoria-metrics-k8s-stack-0     1/1     Running   0          5m
+vmsingle-vmks-victoria-metrics-k8s-stack-6b9755569b-7r22n    1/1     Running   0          5m
+vmagent-vmks-victoria-metrics-k8s-stack-5d488f8c89-kjjkn     2/2     Running   0          5m
 ...
 ```
 

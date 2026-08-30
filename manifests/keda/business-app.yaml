@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/business-app:latest
+        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/business-app:1.0.0
         ports:
         - containerPort: 8080
           name: http
