@@ -88,22 +88,7 @@ spec:
 
 Теперь самое интересное — развернём кластер и спровоцируем вытеснение. Предполагается, что k8s кластер c динамическими/autoscale нодами уже развёрнут.
 
-### Шаг 0. Проверяем стенд
-
-Сначала в k8s 1 нода.
-
-```bash
-$ kubectl get nodes
-NAME                       STATUS   ROLES    AGE   VERSION
-cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   3m    v1.33.x
-```
-
-```bash
-$ kubectl get priorityclasses.scheduling.k8s.io
-NAME                      VALUE        GLOBAL-DEFAULT   AGE
-system-cluster-critical   2000000000   false            10m
-system-node-critical      2000001000   false            10m
-```
+### Шаг 0. Устанавливаем VictoriaMetrics
 
 ```
 $ helm upgrade --install vmks \
@@ -113,12 +98,21 @@ $ helm upgrade --install vmks \
     -f vmks-values.yaml
 ```
 
-### Шаг 1. Применяем PriorityClass
+### Шаг 1. Устанавливаем KEDA
+
+KEDA добавляет в кластер горизонтальный автоскейлинг приложений по внешним метрикам — в нашем случае по RPS из Prometheus-совместимого API vmsingle:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace --version 2.20.2
+```
+
+### Шаг 2. Применяем PriorityClass
 ```bash
 kubectl apply -f priorityclasses.yaml
 ```
 
-
+### Шаг 3. Проверяем PriorityClass
 ```bash
 $ kubectl get priorityclasses.scheduling.k8s.io
 NAME                       VALUE        GLOBAL-DEFAULT   AGE
@@ -146,16 +140,7 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода под capacity-overprovisioning под
 ```
 
-Анти-аффинность в манифесте распределяет capacity-overprovisioning поды по разным нодам, поэтому один занял новую ноду, а второй остался в Pending — он и удерживает Autoscaler от scale-down обратно к одной ноде.
 
-### Шаг 3. Устанавливаем KEDA
-
-KEDA добавляет в кластер горизонтальный автоскейлинг приложений по внешним метрикам — в нашем случае по RPS из Prometheus-совместимого API vmsingle:
-
-```bash
-helm repo add kedacore https://kedacore.github.io/charts
-helm install keda kedacore/keda --namespace keda --create-namespace --version 2.20.2
-```
 
 ### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
