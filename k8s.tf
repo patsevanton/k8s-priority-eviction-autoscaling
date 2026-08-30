@@ -73,7 +73,7 @@ resource "yandex_kubernetes_node_group" "k8s_node_group" {
   scale_policy {
     auto_scale {
       min     = 1 # Минимальное количество нод
-      max     = 3 # Максимальное количество нод
+      max     = 5 # Максимальное количество нод
       initial = 1 # Стартовое количество нод
     }
   }
@@ -99,7 +99,7 @@ resource "yandex_kubernetes_node_group" "k8s_node_group" {
 
     boot_disk {
       type = "network-ssd" # Тип диска
-      size = 30            # Размер диска
+      size = 33            # Размер диска
     }
   }
 }
