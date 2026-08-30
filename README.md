@@ -66,15 +66,6 @@ spec:
     spec:
       priorityClassName: capacity-overprovisioning
       terminationGracePeriodSeconds: 0 # Резерв должен освобождаться мгновенно
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchLabels:
-                  app: overprovisioning
-              topologyKey: topology.kubernetes.io/hostname
       containers:
       - name: pause
         image: registry.k8s.io/pause:3.10 # Контейнер, который просто «спит»
@@ -92,13 +83,6 @@ spec:
 - **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Ресурсы которые могут отдать capacity-overprovisioning поды = `replicas × requests`.
 - **`terminationGracePeriodSeconds: 0`.** Capacity-overprovisioning поду освобождаются мгновенно.
 - **Pod anti-affinity** (`preferredDuringSchedulingIgnoredDuringExecution` по hostname) — «мягкое» правило, старающееся распределить capacity-overprovisioning поды по разным нодам.
-
-### requests запускает масштабирование, priority разрешает вытеснение
-
-Здесь легко запутаться, поэтому разделим роли явно:
-
-- **`resources.requests` capacity-overprovisioning пода — триггер scale-up.** Приоритет сам по себе не заставляет Cluster Autoscaler ничего делать: автоскейлер реагирует только на поды в состоянии `Pending` из-за нехватки ресурсов.
-- **Отрицательный `priority` — включатель мгновенного вытеснения.** Он гарантирует, что занятый capacity-overprovisioning подом объём будет отдан новому поду немедленно, без ожидания.
 
 ### Экономия ночью и утром
 

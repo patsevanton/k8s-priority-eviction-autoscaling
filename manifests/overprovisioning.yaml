@@ -26,17 +26,6 @@ spec:
       priorityClassName: capacity-overprovisioning
       # Не ждём 30 секунд graceful shutdown — место должно освобождаться сразу
       terminationGracePeriodSeconds: 0
-      # Распределяем capacity-overprovisioning поды по разным нодам, чтобы резерв
-      # не сваливался на одну и ту же ноду
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchLabels:
-                  app: overprovisioning
-              topologyKey: topology.kubernetes.io/hostname
       containers:
       - name: pause
         image: registry.k8s.io/pause:3.10
