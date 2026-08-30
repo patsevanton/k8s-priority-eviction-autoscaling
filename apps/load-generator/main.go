@@ -135,7 +135,7 @@ func main() {
 	var lastTick time.Time
 	for ctx.Err() == nil {
 		rps := rpsAt(time.Since(start), cycle, minRPS, maxRPS, midpoint)
-		if rps <= 0 {
+		if rps < 1 {
 			select {
 			case <-time.After(time.Second):
 			case <-ctx.Done():
@@ -144,6 +144,9 @@ func main() {
 		}
 
 		interval := time.Duration(float64(time.Second) / rps)
+		if interval > time.Second {
+			interval = time.Second
+		}
 		if lastTick.IsZero() {
 			lastTick = time.Now()
 		}
