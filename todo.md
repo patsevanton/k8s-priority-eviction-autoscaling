@@ -17,7 +17,3 @@ if minReplicas > 0 && idleReplicaNotZero { warn CooldownPeriod }
 - **PollingInterval** — период, с которым `startScaleLoop` (`pkg/scaling/scale_handler.go`) пересчитывает активность триггеров через `checkScalers`. Но при `minReplicaCount > 0` фактическим скейлингом управляет HPA: он сам опрашивает KEDA metrics API с периодом `hpa-sync-period` (по умолчанию 15с), а не `pollingInterval`. Собственный цикл KEDA в этом режиме нужен только для (а) определения неактивности → scale-to-zero и (б) наполнения кеша метрик при `useCachedMetrics`. Раз ни того, ни другого нет — значение игнорируется.
 
 Вывод: при `minReplicaCount: 1` без `useCachedMetrics` оба поля можно спокойно удалить из `manifests/keda/scaledobject.yaml` — поведение не изменится. Оставить можно (это warning, не ошибка), но они вводят в заблуждение.
-
-## Fallback: currentReplicas
-
-При недоступности VictoriaMetrics — `fallback.behavior: currentReplicas` (в `manifests/keda/scaledobject.yaml`): при сбое метрик держать текущее число реплик.
