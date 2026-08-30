@@ -109,7 +109,7 @@ helm install keda kedacore/keda --namespace keda --create-namespace --version 2.
 
 ### Шаг 2. Применяем PriorityClass
 
-Конфиг указан выше.
+Конфиг указан выше — [priorityclasses.yaml](priorityclasses.yaml).
 ```bash
 kubectl apply -f priorityclasses.yaml
 ```
@@ -125,7 +125,7 @@ system-node-critical       2000001000   false            10m
 
 ### Шаг 2. Запускаем capacity-overprovisioning поды
 
-Конфиг указан выше.
+Конфиг указан выше — [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml).
 ```bash
 kubectl apply -f manifests/overprovisioning.yaml
 ```
@@ -145,6 +145,8 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода по
 
 ### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
+Манифесты: [business-app.yaml](manifests/keda/business-app.yaml), [scaledobject.yaml](manifests/keda/scaledobject.yaml), [load-generator.yaml](manifests/keda/load-generator.yaml).
+
 ```bash
 kubectl apply -f manifests/keda/business-app.yaml
 kubectl apply -f manifests/keda/scaledobject.yaml
@@ -152,9 +154,9 @@ kubectl apply -f manifests/keda/load-generator.yaml
 kubectl apply -f manifests/keda/vmservicescrape.yaml
 ```
 
-- `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
-- `scaledobject.yaml` — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
-- `load-generator` — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
+- `business-app` ([manifests/keda/business-app.yaml](manifests/keda/business-app.yaml), исходники: [apps/business-app/](apps/business-app/)) — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
+- `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
+- `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
 
 ### Шаг 5. Наблюдаем полный цикл: рост → вытеснение
 
@@ -213,13 +215,3 @@ overprovisioning-...-d3e4f        1/1     Running   cl1...-wxyz
 ## Итоги
 
 Мы настроили отрицательный PriorityClass для capacity-overprovisioning подов — и пронаблюдали полный цикл на живом бизнес-приложении: KEDA по RPS поднял реплики business-app, новые реплики мгновенно вытеснили capacity-overprovisioning поды, буфер ушёл в Pending, Cluster Autoscaler добавил ноду, и резерв восстановился. Паттерн node overprovisioning даёт «тёплый» резерв: место под будущий пик держится заранее, а при всплеске освобождается за секунды (вместо минут ожидания, пока облако подготовит новую ноду).
-
-Все конфигурации из статьи:
-
-- [priorityclasses.yaml](priorityclasses.yaml) — PriorityClass для capacity-overprovisioning подов с отрицательным значением
-- [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml) — capacity-overprovisioning поды для «тёплого» резерва
-- [manifests/keda/business-app.yaml](manifests/keda/business-app.yaml) — бизнес-приложение (Deployment + Service)
-- [manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml) — KEDA ScaledObject, масштабирование по RPS из VictoriaMetrics
-- [manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml) — генератор нагрузки с профилем RPS «день/ночь»
-- [apps/business-app/](apps/business-app/) — исходники бизнес-приложения (Go)
-- [apps/load-generator/](apps/load-generator/) — исходники генератора нагрузки (Go)
