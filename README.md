@@ -164,15 +164,7 @@ kubectl apply -f manifests/keda/load-generator.yaml
 
 - `business-app` ([manifests/keda/business-app.yaml](manifests/keda/business-app.yaml), исходники: [apps/business-app/](apps/business-app/)) — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
 - `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 60; пик 600 RPS → 24 реплики).
-- `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — плавно наращивает RPS на business-app по гладкой S-образной кривой smoothstep (без излома в точке перегиба): за `CYCLE` (30м) RPS растёт с 0 до 600 — медленно в начале, быстрее в середине, снова медленно к концу, после чего удерживает максимум. Параметры графика (`MIN_RPS`, `MAX_RPS`, `MIDPOINT`, `CYCLE`) вынесены в переменные окружения манифеста.
-
-```mermaid
-xychart-beta
-    title "RPS генератора нагрузки — гладкая S-кривая (smoothstep, точка перегиба 0.5)"
-    x-axis "время (минуты)" 0 --> 30
-    y-axis "RPS" 0 --> 600
-    line [0, 3, 17, 49, 95, 150, 205, 251, 283, 297, 300, 303, 317, 349, 395, 450, 505, 551, 583, 597, 600]
-```
+- `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — плавно наращивает RPS на business-app по кривой.
 
 ### Шаг 6. Наблюдаем полный цикл: рост → вытеснение
 
@@ -213,6 +205,40 @@ overprovisioning-...-d3e4f        1/1     Running   cl1...-wxyz
 ```
 
 Полный цикл замкнулся: **рост RPS → KEDA поднимает реплики → мгновенное вытеснение → реальный под работает → новая нода**.
+
+### Наблюдение в Grafana
+
+Ниже — PromQL-запросы и скриншоты из Grafana, по которым можно наблюдать весь цикл.
+
+**RPS бизнес-приложения** — входящий трафик на `/`, метрика, на которую смотрит KEDA-триггер:
+
+```promql
+sum(rate(business_app_http_requests_total{route="root"}[1m]))
+```
+![RPS бизнес-приложения — бизнес-метрика (триггер KEDA)](images/business-app-rps.png)
+
+**Реплики HPA** — текущее и желаемое количество реплик, которые KEDA выставил через HPA:
+
+```promql
+kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler="keda-hpa-business-app", namespace="default"}
+kube_horizontalpodautoscaler_status_desired_replicas{horizontalpodautoscaler="keda-hpa-business-app", namespace="default"}
+```
+![Текущее и желаемое количество реплик HPA keda-hpa-business-app](images/hpa-replicas.png)
+
+**RPS на реплику** — метрика, которую KEDA держит на уровне ~25 RPS на реплику:
+
+```promql
+sum(rate(business_app_http_requests_total{route="root"}[1m])) / clamp_min(kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler="keda-hpa-business-app", namespace="default"}, 1)
+```
+![RPS на реплику](images/rps-per-replica.png)
+
+**Реплики Deployment** — доступные и заданные реплики бизнес-приложения:
+
+```promql
+kube_deployment_status_replicas_available{deployment="business-app", namespace="default"}
+kube_deployment_spec_replicas{deployment="business-app", namespace="default"}
+```
+![Доступные и заданные реплики Deployment business-app](images/deployment-replicas.png)
 
 ## Важные нюансы для корректной работы
 
