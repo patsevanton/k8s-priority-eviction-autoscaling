@@ -16,7 +16,7 @@
 
 **3. Автоскейлинг нод (Cluster Autoscaler).** Вытеснённый capacity-overprovisioning под (или любой другой, который не помещается) переходит в статус Pending. Cluster Autoscaler видит поды, которые не могут разместиться, и разворачивает новую ноду.
 
-Получается замкнутый цикл: **запас capacity-overprovisioning подов занят на нодах → нагрузка растёт → реплики бизнес-приложений увеличиваются через HPA/KEDA → capacity-overprovisioning под вытесняется за секунды → реальный под запущен → capacity-overprovisioning под в Pending → новая нода**.
+Получается замкнутый цикл:
 
 ```mermaid
 flowchart TD
@@ -25,9 +25,8 @@ flowchart TD
     C["KEDA увеличивает количество подов business-app"]
     D["business-app под в Running<br/>capacity-overprovisioning под в Pending"]
     E["Cluster Autoscaler добавляет новую ноду"]
-    F["capacity-overprovisioning под снова Running на новой ноде"]
 
-    A --> B --> C --> D --> E --> F --> A
+    A --> B --> C --> D --> E --> A
 ```
 
 ## Как это настроить
