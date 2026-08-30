@@ -103,10 +103,10 @@ spec:
         image: registry.k8s.io/pause:3.10 # Контейнер, который просто «спит»
         resources:
           requests:
-            cpu: 1 # 1 ядро; размер резерва, который держит один capacity-overprovisioning под
+            cpu: 1
             memory: 1Gi
           limits:
-            cpu: 1 # 1 ядро
+            cpu: 1
             memory: 1Gi
 ```
 Ключевые детали:

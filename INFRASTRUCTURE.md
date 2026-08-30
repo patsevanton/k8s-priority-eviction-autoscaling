@@ -56,15 +56,7 @@ Values рендерятся Terraform'ом из шаблона [vmks-values.yaml
   `RecordingRulesNoData`.
 
 После `terraform apply` (Terraform уже сгенерировал `vmks-values.yaml`) стек ставится
-вручную:
-
-```bash
-helm upgrade --install vmks \
-  oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
-  --namespace vmks --create-namespace \
-  --wait --version 0.90.2 --timeout 15m \
-  -f vmks-values.yaml
-```
+вручную — команда установки приведена в [README.md](README.md).
 
 ## Требования
 
@@ -94,27 +86,14 @@ yc managed-kubernetes cluster get-credentials --id $(terraform output -raw k8s_c
 kubectl get nodes
 ```
 
-Должна быть видна одна нода с автоскейлингом:
-
-```
-NAME                       STATUS   ROLES    AGE   VERSION
-cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   2m    v1.33.x
-```
+Должна быть видна одна нода с автоскейлингом (вывод `kubectl get nodes` — в
+[README.md](README.md)).
 
 Terraform устанавливает Traefik и генерирует `vmks-values.yaml`; VictoriaMetrics K8s
-Stack ставится вручную через `helm` (см. раздел выше). Проверяем поды мониторинга и
-доступ к Grafana:
+Stack ставится вручную через `helm` (см. раздел выше). Проверка подов мониторинга
+приведена в [README.md](README.md). Доступ к Grafana:
 
 ```bash
-$ kubectl get pods -n vmks
-NAME                                                        READY   STATUS    RESTARTS   AGE
-vmks-grafana-...                                            1/1     Running   0          2m
-vmks-kube-state-metrics-...                                 1/1     Running   0          2m
-vmks-prometheus-node-exporter-...                           1/1     Running   0          2m
-vmks-victoria-metrics-operator-...                          1/1     Running   0          2m
-vmsingle-vmks-victoria-metrics-k8s-stack-...                1/1     Running   0          2m
-vmagent-vmks-victoria-metrics-k8s-stack-...                 1/1     Running   0          2m
-
 $ terraform output -raw grafana_url
 http://grafana.84.201.172.10.sslip.io
 
