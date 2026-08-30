@@ -227,6 +227,7 @@ helm install keda kedacore/keda --namespace keda --create-namespace --version 2.
 kubectl apply -f manifests/keda/business-app.yaml
 kubectl apply -f manifests/keda/scaledobject.yaml
 kubectl apply -f manifests/keda/load-generator.yaml
+kubectl apply -f manifests/keda/vmservicescrape.yaml
 ```
 
 - `business-app` — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 1 CPU / 1Gi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
