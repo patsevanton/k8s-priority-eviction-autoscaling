@@ -1,5 +1,5 @@
 # VMServiceScrape: vmagent берёт метрики business-app по /metrics.
-# Без этого ScaledObject KEDA не видит RPS в vmsingle (см. todo.md).
+# Без этого ScaledObject KEDA не видит RPS в vmsingle
 # Оператор VictoriaMetrics (в отличие от prometheus-operator) аннотации
 # prometheus.io/scrape не читает — нужен явный scrape-конфиг.
 apiVersion: operator.victoriametrics.com/v1beta1

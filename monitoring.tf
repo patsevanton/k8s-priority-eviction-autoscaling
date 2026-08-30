@@ -1,20 +1,4 @@
-# Мониторинг: Traefik (ingress) + VictoriaMetrics K8s Stack.
-#
-# VictoriaMetrics ставится ВРУЧНУЮ через helm в namespace `vmks`
-# (victoria-metrics-k8s-stack: vmagent + vmsingle + Grafana + node-exporter +
-# kube-state-metrics), как в других проектах. vmsingle — источник метрик для KEDA
-# ScaledObject (http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428),
-# Grafana открывается через Traefik по FQDN из sslip.io.
-#
-# Terraform только генерирует values-файл vmks-values.yaml из шаблона
-# vmks-values.yaml.tftpl (подстановка ingress_public_ip). Дальше релиз
-# устанавливается вручную:
-#
-#   helm upgrade --install vmks \
-#     oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
-#     --namespace vmks --create-namespace \
-#     --wait --version 0.90.2 --timeout 15m \
-#     -f vmks-values.yaml
+# Мониторинг: Traefik (ingress).
 
 locals {
   vmks_values = templatefile("${path.module}/vmks-values.yaml.tftpl", {

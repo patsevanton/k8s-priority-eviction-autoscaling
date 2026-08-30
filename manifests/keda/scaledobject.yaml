@@ -28,5 +28,3 @@ spec:
         sum(rate(business_app_http_requests_total{route="root"}[1m]))
       threshold: "25" # Одна реплика обслуживает ~25 RPS
       activationThreshold: "3" # Ниже 3 RPS не поднимаем дополнительные реплики
----
-# TriggerAuthentication не нужен: VictoriaMetrics в демо доступен без авторизации.
