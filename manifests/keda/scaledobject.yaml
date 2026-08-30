@@ -14,7 +14,8 @@ spec:
     name: business-app
   minReplicaCount: 1 # Ночью (0 RPS) держим одну реплику
   maxReplicaCount: 60 # Потолок под пик 600 RPS: желаемые реплики = 600/25 = 24
-  pollingInterval: 15 # Как часто опрашиваем метрику (секунды)
+  pollingInterval: 30 # Как часто опрашиваем метрику (секунды)
+  useCachedMetrics: true # HPA читает закешированное значение вместо запроса к VictoriaMetrics на каждый sync
   fallback: # Если VictoriaMetrics недоступен — держим текущее число реплик
     behavior: currentReplicas
     failureThreshold: 3
