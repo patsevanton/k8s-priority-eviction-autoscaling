@@ -94,8 +94,7 @@ spec:
 $ helm upgrade --install vmks \
     oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack \
     --namespace vmks --create-namespace \
-    --wait --version 0.90.2 --timeout 15m \
-    -f vmks-values.yaml
+    --wait --version 0.90.2 --timeout 15m
 ```
 
 ### Шаг 1. Устанавливаем KEDA
@@ -145,13 +144,17 @@ cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода по
 
 ### Шаг 5. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
-Манифесты: [business-app.yaml](manifests/keda/business-app.yaml), [scaledobject.yaml](manifests/keda/scaledobject.yaml), [load-generator.yaml](manifests/keda/load-generator.yaml).
+Манифесты: [business-app.yaml](manifests/keda/business-app.yaml), [scaledobject.yaml](manifests/keda/scaledobject.yaml).
 
 ```bash
 kubectl apply -f manifests/keda/business-app.yaml
 kubectl apply -f manifests/keda/scaledobject.yaml
-kubectl apply -f manifests/keda/load-generator.yaml
 kubectl apply -f manifests/keda/vmservicescrape.yaml
+```
+
+Запускаем генератор трафика [load-generator.yaml](manifests/keda/load-generator.yaml)
+```
+kubectl apply -f manifests/keda/load-generator.yaml
 ```
 
 - `business-app` ([manifests/keda/business-app.yaml](manifests/keda/business-app.yaml), исходники: [apps/business-app/](apps/business-app/)) — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).

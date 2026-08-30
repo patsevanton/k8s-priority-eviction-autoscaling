@@ -1,17 +1,5 @@
 # Мониторинг: Traefik (ingress).
 
-locals {
-  vmks_values = templatefile("${path.module}/vmks-values.yaml.tftpl", {
-    ingress_public_ip = local.ingress_ip
-  })
-}
-
-resource "local_file" "write_vmks_values" {
-  content         = local.vmks_values
-  filename        = "${path.module}/vmks-values.yaml"
-  file_permission = "0644"
-}
-
 # Ingress-контроллер Traefik: балансировщик LoadBalancer получает публичный IP
 # (yandex_vpc_address.ingress), из которого через sslip.io формируется FQDN Grafana.
 resource "helm_release" "traefik" {
