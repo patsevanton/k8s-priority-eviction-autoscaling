@@ -15,7 +15,6 @@ spec:
   minReplicaCount: 1 # Ночью (0 RPS) держим одну реплику
   maxReplicaCount: 60 # Потолок под пик 600 RPS: желаемые реплики = 600/25 = 24
   pollingInterval: 15 # Как часто опрашиваем метрику (секунды)
-  cooldownPeriod: 120 # Не отпускаем реплики сразу после падения RPS
   fallback: # Если VictoriaMetrics недоступен — держим текущее число реплик
     behavior: currentReplicas
     failureThreshold: 3
