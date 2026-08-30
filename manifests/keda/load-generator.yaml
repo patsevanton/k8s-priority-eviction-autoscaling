@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
       - name: load-generator
-        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.1.0
+        image: ghcr.io/patsevanton/k8s-priority-eviction-autoscaling/load-generator:1.2.0
         env:
         - name: TARGET_URL
           value: "http://business-app:8080/"
