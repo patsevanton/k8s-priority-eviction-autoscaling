@@ -140,7 +140,7 @@ overprovisioning-...-a1b2c        1/1     Running   cl1...-uabc
 overprovisioning-...-d3e4f        1/1     Running   cl1...-uabc
 ```
 
-Вытеснение и масштабирование нод начнутся позже, когда бизнес-нагрузка заполнит ноду (см. Шаг 6): новая реплика business-app вытеснит capacity-overprovisioning под, тот уйдёт в Pending, и только тогда Cluster Autoscaler развернёт новую ноду. Здесь мы лишь создаём «тёплый» резерв заранее.
+Вытеснение и масштабирование нод начнутся позже, когда бизнес-нагрузка заполнит ноду (см. Шаг 8): новая реплика business-app вытеснит capacity-overprovisioning под, тот уйдёт в Pending, и только тогда Cluster Autoscaler развернёт новую ноду. Здесь мы лишь создаём «тёплый» резерв заранее.
 
 Если же нода уже заполнена другими подами и второму capacity-overprovisioning поду не хватает места, он сразу уйдёт в Pending — и Cluster Autoscaler развернёт ноду уже на этом шаге:
 
@@ -151,24 +151,69 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода под capacity-overprovisioning под
 ```
 
-### Шаг 5. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
+### Шаг 5. Развёртываем бизнес-приложение
 
 ```bash
 kubectl apply -f manifests/keda/business-app.yaml
-kubectl apply -f manifests/keda/scaledobject.yaml
-kubectl apply -f manifests/keda/vmservicescrape.yaml
-```
-
-Запускаем генератор трафика
-```
-kubectl apply -f manifests/keda/load-generator.yaml
 ```
 
 - `business-app` ([manifests/keda/business-app.yaml](manifests/keda/business-app.yaml), исходники: [apps/business-app/](apps/business-app/)) — Go-приложение с HTTP API `/` и метриками Prometheus на `/metrics`. Каждая реплика запрашивает 250m CPU / 250Mi — ровно как capacity-overprovisioning под, поэтому при scale-out новая реплика (приоритет 0) гарантированно вытесняет его (приоритет -10).
+
+### Шаг 6. Применяем ScaledObject — KEDA-триггер
+
+`ScaledObject` описывает всю логику автоскейлинга business-app: какой запрос к vmsingle выполнять, сколько RPS держать на реплику, min/max реплик. Под капотом KEDA сам создаёт и обслуживает HPA.
+
+```bash
+kubectl apply -f manifests/keda/scaledobject.yaml
+```
+
+Полный манифест [manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml):
+
+```yaml
+# KEDA ScaledObject: масштабирование business-app по фактическому RPS.
+# Метрику rate(business_app_http_requests_total[1m]) берём из VictoriaMetrics
+# (совместим с Prometheus API) через endpoint vmsingle.
+#
+# Математика масштабирования:
+#   желаемые реплики = ceil(суммарный RPS / 25)
+#   25 RPS → 1 реплика, 300 RPS → 12 реплик, 600 RPS → 24 реплики.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: business-app
+spec:
+  scaleTargetRef:
+    name: business-app
+  minReplicaCount: 1 # Ночью (0 RPS) держим одну реплику
+  maxReplicaCount: 60 # Потолок под пик 600 RPS: желаемые реплики = 600/25 = 24
+  pollingInterval: 30 # Как часто опрашиваем метрику (секунды)
+  useCachedMetrics: true # HPA читает закешированное значение вместо запроса к VictoriaMetrics на каждый sync
+  fallback: # Если VictoriaMetrics недоступен — держим текущее число реплик
+    behavior: currentReplicas
+    failureThreshold: 3
+    replicas: 1 # Обязательное поле; при behavior: currentReplicas значение не используется
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://vmsingle-vmks-victoria-metrics-k8s-stack.vmks.svc.cluster.local:8428
+      query: |
+        sum(rate(business_app_http_requests_total{route="root"}[1m]))
+      threshold: "25" # Одна реплика обслуживает ~25 RPS
+      activationThreshold: "3" # Ниже 3 RPS не поднимаем дополнительные реплики
+```
+
 - `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 60; пик 600 RPS → 24 реплики).
+
+### Шаг 7. Подключаем сбор метрик и запускаем генератор нагрузки
+
+```bash
+kubectl apply -f manifests/keda/vmservicescrape.yaml
+kubectl apply -f manifests/keda/load-generator.yaml
+```
+
 - `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — плавно наращивает RPS на business-app по кривой.
 
-### Шаг 6. Наблюдаем полный цикл: рост → вытеснение
+### Шаг 8. Наблюдаем полный цикл: рост → вытеснение
 
 Следим за репликами business-app и HPA, который создал KEDA:
 
