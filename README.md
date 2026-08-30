@@ -83,7 +83,7 @@ spec:
 
 - **`value: -10`.** Отрицательный приоритет гарантирует, что обычные поды вытесняют capacity-overprovisioning поды: поды без `priorityClassName` имеют приоритет **0**, то есть выше. Значения ниже `-10` не обрабатываются Cluster Autoscale.
 - **`requests` — это и есть размер резерва.** Контейнер `pause` потребляет копейки; capacity-overprovisioning под «занимает» ровно столько, сколько заявлено в `resources.requests`. Ресурсы которые могут отдать capacity-overprovisioning поды = `replicas × requests`.
-- **`terminationGracePeriodSeconds: 0`.** Capacity-overprovisioning поl освобождаются мгновенно.
+- **`terminationGracePeriodSeconds: 0`.** Capacity-overprovisioning поды освобождаются мгновенно.
 
 ## Демо: вытеснение в живом кластере
 
@@ -112,16 +112,6 @@ $ helm upgrade --install vmks \
     --namespace vmks --create-namespace \
     --wait --version 0.90.2 --timeout 15m \
     -f vmks-values.yaml
-```
-
-
-# vmsingle отвечает на запросы — KEDA будет брать метрику RPS отсюда
-```
-$ kubectl get pods -n vmks
-NAME                                          READY   STATUS    RESTARTS   AGE
-vmsingle-vmks-victoria-metrics-k8s-stack-6b9755569b-7r22n    1/1     Running   0          5m
-vmagent-vmks-victoria-metrics-k8s-stack-5d488f8c89-kjjkn     2/2     Running   0          5m
-...
 ```
 
 ### Шаг 1. Применяем PriorityClass
