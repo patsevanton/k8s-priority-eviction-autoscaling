@@ -123,7 +123,7 @@ system-cluster-critical    2000000000   false            10m
 system-node-critical       2000001000   false            10m
 ```
 
-### Шаг 2. Запускаем capacity-overprovisioning поды
+### Шаг 4. Запускаем capacity-overprovisioning поды
 
 Конфиг указан выше — [manifests/overprovisioning.yaml](manifests/overprovisioning.yaml).
 ```bash
@@ -143,7 +143,7 @@ cl1v2fmpkgn4srb2b1mm-uxyz   Ready    <none>   18m
 cl1v2fmpkgn4srb2b1mm-uabc   Ready    <none>   2m    ← новая нода под capacity-overprovisioning под
 ```
 
-### Шаг 4. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
+### Шаг 5. Развёртываем бизнес-приложение, KEDA-триггер и генератор нагрузки
 
 Манифесты: [business-app.yaml](manifests/keda/business-app.yaml), [scaledobject.yaml](manifests/keda/scaledobject.yaml), [load-generator.yaml](manifests/keda/load-generator.yaml).
 
@@ -158,7 +158,7 @@ kubectl apply -f manifests/keda/vmservicescrape.yaml
 - `scaledobject.yaml` ([manifests/keda/scaledobject.yaml](manifests/keda/scaledobject.yaml)) — триггер KEDA: Prometheus scaler берёт из vmsingle метрику `sum(rate(business_app_http_requests_total{route="root"}[1m]))` и держит ~25 RPS на реплику (min 1 / max 4).
 - `load-generator` ([manifests/keda/load-generator.yaml](manifests/keda/load-generator.yaml), исходники: [apps/load-generator/](apps/load-generator/)) — гоняет на business-app лестницу RPS «день/ночь»: ночь 0 RPS (2м) → 5 RPS (3м) → 20 RPS (3м) → 60 RPS (3м) → пик 100 RPS (5м) → спад 20 RPS (3м) → ночь 0 RPS (2м), затем повтор бесконечно.
 
-### Шаг 5. Наблюдаем полный цикл: рост → вытеснение
+### Шаг 6. Наблюдаем полный цикл: рост → вытеснение
 
 Следим за репликами business-app и HPA, который создал KEDA:
 
@@ -202,13 +202,13 @@ overprovisioning-...-d3e4f        1/1     Running   cl1...-wxyz
 
 **Запросы ресурсов (Requests).** Вытеснение сработает только в том случае, если у ваших подов чётко прописаны `resources.requests`. Kubernetes сравнивает приоритеты только тогда, когда физически не может разместить под из-за нехватки запрошенных ресурсов. Под без requests для планировщика «весит ноль» — он не вытеснит никого и сам не станет причиной масштабирования. Это самая частая причина, почему приоритеты «не работают». Полезно запомнить разделение ролей: **requests — триггер масштабирования, priority — право вытеснять**. Приоритет сам по себе не заставляет Cluster Autoscaler создавать ноды — тот реагирует только на поды в состоянии `Unschedulable` из-за нехватки ресурсов.
 
-**Поды без requests и limits (BestEffort).** Если в namespace нет LimitRange, под без requests и limits получает QoS-класс `BestEffort` — и вся приоритетная механика для него переворачивается:
+**Поды без requests и limits (BestEffort).** Под без requests и limits получает QoS-класс `BestEffort` — и вся приоритетная механика для него переворачивается:
 
 - **Для планировщика он весит ноль.** Он разместится на любую ноду, даже полностью «занятую» по requests; по нехватке ресурсов он никогда не бывает Unschedulable, а значит — никогда не подаст Cluster Autoscaler сигнал «нужна нода».
 - **Его нельзя вытеснить ради освобождения места.** Удаление пода с requests = 0 освобождает для планировщика ровно ноль, поэтому scheduler preemption не выбирает его жертвой: реально занятые им гигабайты памяти «непробиваемы» для приоритетного вытеснения.
-- **Зато он первый кандидат на node-pressure eviction и OOM-killer.** Kubelet при нехватке памяти ранжирует поды сначала по превышению requests и только потом по приоритету — а BestEffort «превышает» всегда (requests = 0). Плюс kubelet выставляет BestEffort-подам максимальный `oom_score_adj = 1000`, поэтому kernel OOM-killer бьёт по ним первыми — независимо от назначенного PriorityClass.
+- **Зато он первый кандидат на node-pressure eviction и OOM-killer.** Kubelet при нехватке памяти ранжирует поды сначала по превышению requests и только потом по приоритету — а BestEffort «превышает» всегда (requests = 0). Плюс kubelet выставляет BestEffort-подам максимальный `oom_score_adj = 1000`, поэтому kernel OOM-killer бьёт по ним первыми. Исключение — поды с классом `system-node-critical`: им kubelet выставляет `oom_score_adj = -997`, и для OOM-killer'а они вне очереди на убийство.
 
-Парадокс: под без requests одновременно «неуязвим» для вытеснения планировщиком и «самый уязвимый» для eviction kubelet'ом — мониторинг без requests умрёт первым именно в момент инцидента, когда он нужнее всего. Вывод: для схемы «приоритеты + overprovisioning» requests должны стоять у всех участников — и у вытесняющих, и у жертв. Если LimitRange не используется, контролируйте это на уровне манифестов и values (например, проверяйте в CI, что у каждого контейнера указаны requests, — включая компоненты мониторинга вроде vmagent, vmsingle, alertmanager).
+Парадокс: под без requests одновременно «неуязвим» для вытеснения планировщиком и «самый уязвимый» для eviction kubelet'ом — мониторинг без requests умрёт первым именно в момент инцидента, когда он нужнее всего. Вывод: для схемы «приоритеты + overprovisioning» requests должны стоять у всех участников — и у вытесняющих, и у жертв. Контролируйте это на уровне манифестов и values (например, проверяйте в CI, что у каждого контейнера указаны requests, — включая компоненты мониторинга вроде vmagent, vmsingle, alertmanager).
 
 **Не путайте с eviction под давлением.** PriorityClass также влияет на порядок, в котором kubelet выселяет поды при нехватке памяти на ноде (node-pressure eviction) — но это другой механизм с другими причинами. Причём kubelet ранжирует поды иначе: сначала — превышение requests по дефицитному ресурсу, только потом — приоритет. QoS-класс пода в вытеснении планировщиком вообще не участвует. В этой статье речь о вытеснении планировщиком (scheduler preemption), которое происходит из-за нехватки места именно для нового пода.
 
